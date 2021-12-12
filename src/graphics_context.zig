@@ -1,6 +1,7 @@
 const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
+const vma = @import("vma.zig");
 const Allocator = std.mem.Allocator;
 
 const required_device_extensions = [_][]const u8{vk.extension_info.khr_swapchain.name};
@@ -9,74 +10,42 @@ const BaseDispatch = vk.BaseWrapper(&.{
     .createInstance,
 });
 
-const InstanceDispatch = vk.InstanceWrapper(&.{
-    .destroyInstance,
-    .createDevice,
-    .destroySurfaceKHR,
-    .enumeratePhysicalDevices,
+const instance_vma = [_]vk.InstanceCommand{
     .getPhysicalDeviceProperties,
-    .enumerateDeviceExtensionProperties,
-    .getPhysicalDeviceSurfaceFormatsKHR,
-    .getPhysicalDeviceSurfacePresentModesKHR,
-    .getPhysicalDeviceSurfaceCapabilitiesKHR,
-    .getPhysicalDeviceQueueFamilyProperties,
-    .getPhysicalDeviceSurfaceSupportKHR,
     .getPhysicalDeviceMemoryProperties,
+};
+const instance_command = [_]vk.InstanceCommand{
+    .destroyInstance,                         .createDevice,
+    .destroySurfaceKHR,                       .enumeratePhysicalDevices,
+    .enumerateDeviceExtensionProperties,      .getPhysicalDeviceSurfaceFormatsKHR,
+    .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceCapabilitiesKHR,
+    .getPhysicalDeviceQueueFamilyProperties,  .getPhysicalDeviceSurfaceSupportKHR,
     .getDeviceProcAddr,
-});
+} ++ instance_vma;
+const InstanceDispatch = vk.InstanceWrapper(&instance_command);
 
-const DeviceDispatch = vk.DeviceWrapper(&.{
-    .destroyDevice,
-    .getDeviceQueue,
-    .createSemaphore,
-    .createFence,
-    .createImageView,
-    .destroyImageView,
-    .destroySemaphore,
-    .destroyFence,
-    .getSwapchainImagesKHR,
-    .createSwapchainKHR,
-    .destroySwapchainKHR,
-    .acquireNextImageKHR,
-    .deviceWaitIdle,
-    .waitForFences,
-    .resetFences,
-    .queueSubmit,
-    .queuePresentKHR,
-    .createCommandPool,
-    .destroyCommandPool,
-    .allocateCommandBuffers,
-    .freeCommandBuffers,
-    .queueWaitIdle,
-    .createShaderModule,
-    .destroyShaderModule,
-    .createPipelineLayout,
-    .destroyPipelineLayout,
-    .createRenderPass,
-    .destroyRenderPass,
-    .createGraphicsPipelines,
-    .destroyPipeline,
-    .createFramebuffer,
-    .destroyFramebuffer,
-    .beginCommandBuffer,
-    .endCommandBuffer,
-    .allocateMemory,
-    .freeMemory,
-    .createBuffer,
-    .destroyBuffer,
-    .getBufferMemoryRequirements,
-    .mapMemory,
-    .unmapMemory,
-    .bindBufferMemory,
-    .cmdBeginRenderPass,
-    .cmdEndRenderPass,
-    .cmdBindPipeline,
-    .cmdDraw,
-    .cmdSetViewport,
-    .cmdSetScissor,
+const device_vma = [_]vk.DeviceCommand{
+    .allocateMemory,             .bindBufferMemory,
+    .bindImageMemory,            .createBuffer,
+    .destroyBuffer,              .flushMappedMemoryRanges,
+    .freeMemory,                 .getBufferMemoryRequirements,
+    .getImageMemoryRequirements, .mapMemory,
+    .unmapMemory,                .cmdCopyBuffer,
+};
+const device_command = [_]vk.DeviceCommand{
+    .destroyDevice,           .getDeviceQueue,        .createSemaphore,     .createFence,
+    .createImageView,         .destroyImageView,      .destroySemaphore,    .destroyFence,
+    .getSwapchainImagesKHR,   .createSwapchainKHR,    .destroySwapchainKHR, .acquireNextImageKHR,
+    .deviceWaitIdle,          .waitForFences,         .resetFences,         .queueSubmit,
+    .queuePresentKHR,         .createCommandPool,     .destroyCommandPool,  .allocateCommandBuffers,
+    .freeCommandBuffers,      .queueWaitIdle,         .createShaderModule,  .destroyShaderModule,
+    .createPipelineLayout,    .destroyPipelineLayout, .createRenderPass,    .destroyRenderPass,
+    .createGraphicsPipelines, .destroyPipeline,       .createFramebuffer,   .destroyFramebuffer,
+    .beginCommandBuffer,      .endCommandBuffer,      .cmdBeginRenderPass,  .cmdEndRenderPass,
+    .cmdBindPipeline,         .cmdDraw,               .cmdSetViewport,      .cmdSetScissor,
     .cmdBindVertexBuffers,
-    .cmdCopyBuffer,
-});
+} ++ device_vma;
+const DeviceDispatch = vk.DeviceWrapper(&device_command);
 
 pub const GraphicsContext = struct {
     vkb: BaseDispatch,
@@ -92,6 +61,7 @@ pub const GraphicsContext = struct {
     dev: vk.Device,
     graphics_queue: Queue,
     present_queue: Queue,
+    allocator: vma.VmaAllocator,
 
     pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: glfw.Window) !GraphicsContext {
         var self: GraphicsContext = undefined;
@@ -102,7 +72,7 @@ pub const GraphicsContext = struct {
 
         const app_info = vk.ApplicationInfo{
             .p_application_name = app_name,
-            .application_version = vk.makeApiVersion(0, 0, 0, 0),
+            .application_version = vk.makeApiVersion(2, 0, 0, 0),
             .p_engine_name = app_name,
             .engine_version = vk.makeApiVersion(0, 0, 0, 0),
             .api_version = vk.API_VERSION_1_2,
@@ -135,6 +105,21 @@ pub const GraphicsContext = struct {
 
         self.mem_props = self.vki.getPhysicalDeviceMemoryProperties(self.pdev);
 
+        // const name = comptime vk.BaseCommand.symbol(.createInstance);
+        // std.log.info("{}", .{@field(self.vkb.dispatch, name)});
+        // std.log.info("{}", .{self.vki});
+        // std.log.info("{}", .{self.vkd});
+        const vma_fns = getVmaVulkanFunction(self.vki, self.vkd);
+        var allocator_info = vma.VmaAllocatorCreateInfo{
+            .flags = .{},
+            .physicalDevice = self.pdev,
+            .device = self.dev,
+            .frameInUseCount = 0,
+            .pVulkanFunctions = &vma_fns,
+            .instance = self.instance,
+            .vulkanApiVersion = vk.API_VERSION_1_2,
+        };
+        self.allocator = try vma.createAllocator(&allocator_info);
         return self;
     }
 
@@ -352,4 +337,42 @@ fn checkExtensionSupport(
     }
 
     return true;
+}
+
+/// --------- Device Dispatch --------------
+/// vma_vulkan_func.vkAllocateMemory                    = vkAllocateMemory
+/// vma_vulkan_func.vkBindBufferMemory                  = vkBindBufferMemory
+/// vma_vulkan_func.vkBindImageMemory                   = vkBindImageMemory
+/// vma_vulkan_func.vkCreateBuffer                      = vkCreateBuffer
+/// vma_vulkan_func.vkCreateImage                       = vkCreateImage
+/// vma_vulkan_func.vkDestroyBuffer                     = vkDestroyBuffer
+/// vma_vulkan_func.vkDestroyImage                      = vkDestroyImage
+/// vma_vulkan_func.vkFlushMappedMemoryRanges           = vkFlushMappedMemoryRanges
+/// vma_vulkan_func.vkFreeMemory                        = vkFreeMemory
+/// vma_vulkan_func.vkGetBufferMemoryRequirements       = vkGetBufferMemoryRequirements
+/// vma_vulkan_func.vkGetImageMemoryRequirements        = vkGetImageMemoryRequirements
+/// vma_vulkan_func.vkInvalidateMappedMemoryRanges      = vkInvalidateMappedMemoryRanges
+/// vma_vulkan_func.vkMapMemory                         = vkMapMemory
+/// vma_vulkan_func.vkUnmapMemory                       = vkUnmapMemory
+/// vma_vulkan_func.vkCmdCopyBuffer                     = vkCmdCopyBuffer
+/// ---------- Instance Dispatch ---------------
+/// vma_vulkan_func.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties
+/// vma_vulkan_func.vkGetPhysicalDeviceProperties       = vkGetPhysicalDeviceProperties
+fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VmaVulkanFunctions {
+    var vma_vulkan_func: vma.VmaVulkanFunctions = undefined;
+
+    // Instance Vma
+    inline for (instance_vma) |cmd| {
+        const name = comptime vk.InstanceCommand.symbol(cmd);
+        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ "in VmaVulkanFunctions");
+        @field(vma_vulkan_func, name) = @field(vki.dispatch, name);
+    }
+
+    // Device Vma
+    inline for (device_vma) |cmd| {
+        const name = comptime vk.DeviceCommand.symbol(cmd);
+        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ "in VmaVulkanFunctions");
+        @field(vma_vulkan_func, name) = @field(vkd.dispatch, name);
+    }
+    return vma_vulkan_func;
 }
