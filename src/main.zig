@@ -2,12 +2,25 @@ const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const resources = @import("resources");
+const vma = @import("vma.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Allocator = std.mem.Allocator;
 
 const app_name = "vulkan-zig triangle example";
 
+fn checkError(result: vk.Result) !void {
+    switch (result) {
+        vk.Result.success => {},
+        vk.Result.error_out_of_host_memory => return error.OutOfHostMemory,
+        vk.Result.error_out_of_device_memory => return error.OutOfDeviceMemory,
+        vk.Result.error_initialization_failed => return error.InitializationFailed,
+        vk.Result.error_layer_not_present => return error.LayerNotPresent,
+        vk.Result.error_extension_not_present => return error.ExtensionNotPresent,
+        vk.Result.error_incompatible_driver => return error.IncompatibleDriver,
+        else => return error.Unknown,
+    }
+}
 const Vertex = struct {
     const binding_description = vk.VertexInputBindingDescription{
         .binding = 0,
@@ -85,15 +98,37 @@ pub fn main() !void {
     }, null);
     defer gc.vkd.destroyCommandPool(gc.dev, pool, null);
 
-    const buffer = try gc.vkd.createBuffer(gc.dev, &.{
+    // const buffer = try gc.vkd.createBuffer(gc.dev, &.{
+    //     .flags = .{},
+    //     .size = @sizeOf(@TypeOf(vertices)),
+    //     .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+    //     .sharing_mode = .exclusive,
+    //     .queue_family_index_count = 0,
+    //     .p_queue_family_indices = undefined,
+    // }, null);
+
+    var allocation: vma.VmaAllocation = undefined;
+    var buffer: vk.Buffer = undefined;
+    const vaci = vma.VmaAllocationCreateInfo{
+        .flags = vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = vma.VMA_MEMORY_USAGE_CPU_TO_GPU,
+        .requiredFlags = .{},
+        .preferredFlags = .{},
+        .memoryTypeBits = 0,
+        .pool = .null_handle,
+        .pUserData = null,
+        .priority = 0,
+    };
+    try checkError(vma.vmaCreateBuffer(gc.allocator, &.{
         .flags = .{},
         .size = @sizeOf(@TypeOf(vertices)),
         .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
-    }, null);
-    defer gc.vkd.destroyBuffer(gc.dev, buffer, null);
+    }, &vaci, &buffer, &allocation, null));
+    defer vma.vmaDestroyBuffer(gc.allocator, buffer, allocation);
+    // defer gc.vkd.destroyBuffer(gc.dev, buffer, null);
     const mem_reqs = gc.vkd.getBufferMemoryRequirements(gc.dev, buffer);
     const memory = try gc.allocate(mem_reqs, .{ .device_local_bit = true });
     defer gc.vkd.freeMemory(gc.dev, memory, null);

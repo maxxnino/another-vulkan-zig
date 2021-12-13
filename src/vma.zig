@@ -48,12 +48,7 @@ pub extern fn vmaSetCurrentFrameIndex(allocator: VmaAllocator, frameIndex: u32) 
 pub extern fn vmaBindBufferMemory(allocator: VmaAllocator, allocation: VmaAllocation, buffer: vk.Buffer) vk.Result;
 pub extern fn vmaBindImageMemory(allocator: VmaAllocator, allocation: VmaAllocation, image: vk.Image) vk.Result;
 pub extern fn vmaCheckCorruption(allocator: VmaAllocator, memoryTypeBits: u32) vk.Result;
-pub extern fn vmaFlushAllocation(
-    allocator: VmaAllocator,
-    allocation: VmaAllocation,
-    offset: vk.DeviceSize,
-    size: vk.DeviceSize
-) vk.Result;
+pub extern fn vmaFlushAllocation(allocator: VmaAllocator, allocation: VmaAllocation, offset: vk.DeviceSize, size: vk.DeviceSize) vk.Result;
 pub extern fn vmaInvalidateAllocation(
     allocator: VmaAllocator,
     allocation: VmaAllocation,
@@ -248,11 +243,11 @@ pub const VmaVulkanFunctions = extern struct {
     vkCreateImage: vk.PfnCreateImage,
     vkDestroyImage: vk.PfnDestroyImage,
     vkCmdCopyBuffer: vk.PfnCmdCopyBuffer,
-    vkGetBufferMemoryRequirements2KHR: vk.PfnGetBufferMemoryRequirements2,
-    vkGetImageMemoryRequirements2KHR: vk.PfnGetImageMemoryRequirements2,
+    vkGetBufferMemoryRequirements2: vk.PfnGetBufferMemoryRequirements2,
+    vkGetImageMemoryRequirements2: vk.PfnGetImageMemoryRequirements2,
     vkBindBufferMemory2KHR: vk.PfnBindBufferMemory2,
     vkBindImageMemory2KHR: vk.PfnBindImageMemory2,
-    vkGetPhysicalDeviceMemoryProperties2KHR: vk.PfnGetPhysicalDeviceProperties2,
+    vkGetPhysicalDeviceMemoryProperties2: vk.PfnGetPhysicalDeviceProperties2,
 };
 
 pub const VmaAllocatorCreateFlags = packed struct {

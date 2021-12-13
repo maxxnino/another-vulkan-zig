@@ -25,12 +25,13 @@ const instance_command = [_]vk.InstanceCommand{
 const InstanceDispatch = vk.InstanceWrapper(&instance_command);
 
 const device_vma = [_]vk.DeviceCommand{
-    .allocateMemory,             .bindBufferMemory,
-    .bindImageMemory,            .createBuffer,
-    .destroyBuffer,              .flushMappedMemoryRanges,
-    .freeMemory,                 .getBufferMemoryRequirements,
-    .getImageMemoryRequirements, .mapMemory,
-    .unmapMemory,                .cmdCopyBuffer,
+    .allocateMemory,               .bindBufferMemory,
+    .bindImageMemory,              .createBuffer,
+    .destroyBuffer,                .flushMappedMemoryRanges,
+    .freeMemory,                   .getBufferMemoryRequirements,
+    .getImageMemoryRequirements,   .mapMemory,
+    .unmapMemory,                  .cmdCopyBuffer,
+    .getBufferMemoryRequirements2,
 };
 const device_command = [_]vk.DeviceCommand{
     .destroyDevice,           .getDeviceQueue,        .createSemaphore,     .createFence,
@@ -364,14 +365,14 @@ fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VmaVulka
     // Instance Vma
     inline for (instance_vma) |cmd| {
         const name = comptime vk.InstanceCommand.symbol(cmd);
-        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ "in VmaVulkanFunctions");
+        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ " in VmaVulkanFunctions");
         @field(vma_vulkan_func, name) = @field(vki.dispatch, name);
     }
 
     // Device Vma
     inline for (device_vma) |cmd| {
         const name = comptime vk.DeviceCommand.symbol(cmd);
-        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ "in VmaVulkanFunctions");
+        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ " in VmaVulkanFunctions");
         @field(vma_vulkan_func, name) = @field(vkd.dispatch, name);
     }
     return vma_vulkan_func;
