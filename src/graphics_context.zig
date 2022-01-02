@@ -62,7 +62,7 @@ pub const GraphicsContext = struct {
     dev: vk.Device,
     graphics_queue: Queue,
     present_queue: Queue,
-    allocator: vma.VmaAllocator,
+    allocator: vma.Allocator,
 
     pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: glfw.Window) !GraphicsContext {
         var self: GraphicsContext = undefined;
@@ -111,7 +111,8 @@ pub const GraphicsContext = struct {
         // std.log.info("{}", .{self.vki});
         // std.log.info("{}", .{self.vkd});
         const vma_fns = getVmaVulkanFunction(self.vki, self.vkd);
-        var allocator_info = vma.VmaAllocatorCreateInfo{
+
+        self.allocator = try vma.Allocator.create(.{
             .flags = .{},
             .physicalDevice = self.pdev,
             .device = self.dev,
@@ -119,12 +120,12 @@ pub const GraphicsContext = struct {
             .pVulkanFunctions = &vma_fns,
             .instance = self.instance,
             .vulkanApiVersion = vk.API_VERSION_1_2,
-        };
-        self.allocator = try vma.createAllocator(&allocator_info);
+        });
         return self;
     }
 
     pub fn deinit(self: GraphicsContext) void {
+        self.allocator.destroy();
         self.vkd.destroyDevice(self.dev, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
@@ -135,24 +136,147 @@ pub const GraphicsContext = struct {
         return self.props.device_name[0..len];
     }
 
-    pub fn findMemoryTypeIndex(self: GraphicsContext, memory_type_bits: u32, flags: vk.MemoryPropertyFlags) !u32 {
-        for (self.mem_props.memory_types[0..self.mem_props.memory_type_count]) |mem_type, i| {
-            if (memory_type_bits & (@as(u32, 1) << @truncate(u5, i)) != 0 and mem_type.property_flags.contains(flags)) {
-                return @truncate(u32, i);
+    pub fn destroy(self: GraphicsContext, resource: anytype) void {
+        const ResourceType = @TypeOf(resource);
+        const destroyFn = blk: {
+            if (ResourceType == vk.Image or ResourceType == vk.Buffer) {
+                const name = @typeName(ResourceType);
+                @compileError("Can not destroy single vk." ++ name ++ " need vma.Create" ++ name ++ "Result");
             }
-        }
-
-        return error.NoSuitableMemoryType;
+            if (ResourceType == vma.CreateBufferResult) return self.allocator.destroyBuffer(resource);
+            if (ResourceType == vma.CreateImageResult) return self.allocator.destroyImage(resource);
+            if (ResourceType == vk.Event) break :blk DeviceDispatch.destroyEvent;
+            if (ResourceType == vk.Fence) break :blk DeviceDispatch.destroyFence;
+            if (ResourceType == vk.Buffer) break :blk DeviceDispatch.destroyBuffer;
+            if (ResourceType == vk.Sampler) break :blk DeviceDispatch.destroySampler;
+            if (ResourceType == vk.Pipeline) break :blk DeviceDispatch.destroyPipeline;
+            if (ResourceType == vk.ImageView) break :blk DeviceDispatch.destroyImageView;
+            if (ResourceType == vk.Semaphore) break :blk DeviceDispatch.destroySemaphore;
+            if (ResourceType == vk.QueryPool) break :blk DeviceDispatch.destroyQueryPool;
+            if (ResourceType == vk.BufferView) break :blk DeviceDispatch.destroyBufferView;
+            if (ResourceType == vk.RenderPass) break :blk DeviceDispatch.destroyRenderPass;
+            if (ResourceType == vk.CommandPool) break :blk DeviceDispatch.destroyCommandPool;
+            if (ResourceType == vk.CuModuleNVX) break :blk DeviceDispatch.destroyCuModuleNVX;
+            if (ResourceType == vk.Framebuffer) break :blk DeviceDispatch.destroyFramebuffer;
+            if (ResourceType == vk.ShaderModule) break :blk DeviceDispatch.destroyShaderModule;
+            if (ResourceType == vk.SwapchainKHR) break :blk DeviceDispatch.destroySwapchainKHR;
+            if (ResourceType == vk.PipelineCache) break :blk DeviceDispatch.destroyPipelineCache;
+            if (ResourceType == vk.CuFunctionNVX) break :blk DeviceDispatch.destroyCuFunctionNVX;
+            if (ResourceType == vk.PipelineLayout) break :blk DeviceDispatch.destroyPipelineLayout;
+            if (ResourceType == vk.DescriptorPool) break :blk DeviceDispatch.destroyDescriptorPool;
+            if (ResourceType == vk.VideoSessionKHR) break :blk DeviceDispatch.destroyVideoSessionKHR;
+            if (ResourceType == vk.ValidationCacheEXT) break :blk DeviceDispatch.destroyValidationCacheEXT;
+            if (ResourceType == vk.PrivateDataSlotEXT) break :blk DeviceDispatch.destroyPrivateDataSlotEXT;
+            if (ResourceType == vk.DescriptorSetLayout) break :blk DeviceDispatch.destroyDescriptorSetLayout;
+            if (ResourceType == vk.DeferredOperationKHR) break :blk DeviceDispatch.destroyDeferredOperationKHR;
+            if (ResourceType == vk.RayTracingPipelinesNV) break :blk DeviceDispatch.destroyRayTracingPipelinesNV;
+            if (ResourceType == vk.RayTracingPipelinesKHR) break :blk DeviceDispatch.destroyRayTracingPipelinesKHR;
+            if (ResourceType == vk.SamplerYcbcrConversion) break :blk DeviceDispatch.destroySamplerYcbcrConversion;
+            if (ResourceType == vk.BufferCollectionFUCHSIA) break :blk DeviceDispatch.destroyBufferCollectionFUCHSIA;
+            if (ResourceType == vk.AccelerationStructureNV) break :blk DeviceDispatch.destroyAccelerationStructureNV;
+            if (ResourceType == vk.AccelerationStructureKHR) break :blk DeviceDispatch.destroyAccelerationStructureKHR;
+            if (ResourceType == vk.DescriptorUpdateTemplate) break :blk DeviceDispatch.destroyDescriptorUpdateTemplate;
+            @compileError(@typeName(ResourceType) ++ " don't have drop function");
+        };
+        destroyFn(self.vkd, self.dev, resource, null);
     }
 
-    pub fn allocate(self: GraphicsContext, requirements: vk.MemoryRequirements, flags: vk.MemoryPropertyFlags) !vk.DeviceMemory {
-        return try self.vkd.allocateMemory(self.dev, &.{
-            .allocation_size = requirements.size,
-            .memory_type_index = try self.findMemoryTypeIndex(requirements.memory_type_bits, flags),
-        }, null);
+    pub fn create(self: GraphicsContext, create_info: anytype) !CreateInfoToType(@TypeOf(create_info)) {
+        const CreateInfo = @TypeOf(create_info);
+        const createFn = blk: {
+            if (CreateInfo == vk.ImageCreateInfo or CreateInfo == vk.BufferCreateInfo) {
+                @compileError("using createImage or createBuffer instead");
+            }
+
+            if (CreateInfo == vk.EventCreateInfo) break :blk DeviceDispatch.createEvent;
+            if (CreateInfo == vk.FenceCreateInfo) break :blk DeviceDispatch.createFence;
+            if (CreateInfo == vk.SamplerCreateInfo) break :blk DeviceDispatch.createSampler;
+            if (CreateInfo == vk.ImageViewCreateInfo) break :blk DeviceDispatch.createImageView;
+            if (CreateInfo == vk.SemaphoreCreateInfo) break :blk DeviceDispatch.createSemaphore;
+            if (CreateInfo == vk.QueryPoolCreateInfo) break :blk DeviceDispatch.createQueryPool;
+            if (CreateInfo == vk.BufferViewCreateInfo) break :blk DeviceDispatch.createBufferView;
+            if (CreateInfo == vk.RenderPassCreateInfo) break :blk DeviceDispatch.createRenderPass;
+            if (CreateInfo == vk.CommandPoolCreateInfo) break :blk DeviceDispatch.createCommandPool;
+            if (CreateInfo == vk.RenderPassCreateInfo) break :blk DeviceDispatch.createRenderPass2;
+            if (CreateInfo == vk.CuModuleCreateInfoNVX) break :blk DeviceDispatch.createCuModuleNVX;
+            if (CreateInfo == vk.FramebufferCreateInfo) break :blk DeviceDispatch.createFramebuffer;
+            if (CreateInfo == vk.ShaderModuleCreateInfo) break :blk DeviceDispatch.createShaderModule;
+            if (CreateInfo == vk.SwapchainCreateInfoKHR) break :blk DeviceDispatch.createSwapchainKHR;
+            if (CreateInfo == vk.PipelineCacheCreateInfo) break :blk DeviceDispatch.createPipelineCache;
+            if (CreateInfo == vk.CuFunctionCreateInfoNVX) break :blk DeviceDispatch.createCuFunctionNVX;
+            if (CreateInfo == vk.PipelineLayoutCreateInfo) break :blk DeviceDispatch.createPipelineLayout;
+            if (CreateInfo == vk.DescriptorPoolCreateInfo) break :blk DeviceDispatch.createDescriptorPool;
+            if (CreateInfo == vk.VideoSessionCreateInfoKHR) break :blk DeviceDispatch.createVideoSessionKHR;
+            if (CreateInfo == vk.ValidationCacheCreateInfoEXT) break :blk DeviceDispatch.createValidationCacheEXT;
+            if (CreateInfo == vk.PrivateDataSlotCreateInfoEXT) break :blk DeviceDispatch.createPrivateDataSlotEXT;
+            if (CreateInfo == vk.DescriptorSetLayoutCreateInfo) break :blk DeviceDispatch.createDescriptorSetLayout;
+            if (CreateInfo == vk.SamplerYcbcrConversionCreateInfo) break :blk DeviceDispatch.createSamplerYcbcrConversion;
+            if (CreateInfo == vk.BufferCollectionCreateInfoFUCHSIA) break :blk DeviceDispatch.createBufferCollectionFUCHSIA;
+            if (CreateInfo == vk.AccelerationStructureCreateInfoNV) break :blk DeviceDispatch.createAccelerationStructureNV;
+            if (CreateInfo == vk.AccelerationStructureCreateInfoKHR) break :blk DeviceDispatch.createAccelerationStructureKHR;
+            if (CreateInfo == vk.DescriptorUpdateTemplateCreateInfo) break :blk DeviceDispatch.createDescriptorUpdateTemplate;
+            if (CreateInfo == vk.IndirectCommandsLayoutCreateInfoNV) break :blk DeviceDispatch.createIndirectCommandsLayoutNV;
+
+            const pipelineCreateFn = blk2: {
+                if (CreateInfo == vk.ComputePipelineCreateInfo) break :blk2 DeviceDispatch.createComputePipelines;
+                if (CreateInfo == vk.GraphicsPipelineCreateInfo) break :blk2 DeviceDispatch.createGraphicsPipelines;
+                if (CreateInfo == vk.RayTracingPipelineCreateInfoNV) break :blk2 DeviceDispatch.createRayTracingPipelinesNV;
+                if (CreateInfo == vk.RayTracingPipelineCreateInfoKHR) break :blk2 DeviceDispatch.createRayTracingPipelinesKHR;
+                @compileError(@typeName(CreateInfo) ++ " don't have create function");
+            };
+            var pipeline: vk.Pipeline = undefined;
+            _ = try pipelineCreateFn(
+                self.vkd,
+                self.dev,
+                .null_handle,
+                1,
+                @ptrCast([*]const CreateInfo, &create_info),
+                null,
+                @ptrCast([*]vk.Pipeline, &pipeline),
+            );
+            return pipeline;
+        };
+        return try createFn(self.vkd, self.dev, &create_info, null);
+    }
+
+    pub fn createBuffer(
+        self: GraphicsContext,
+        buffer_create_info: vk.BufferCreateInfo,
+        allocation_create_info: vma.AllocatorCreateInfo,
+    ) !vma.CreateBufferResult {
+        return self.allocator.createBuffer(buffer_create_info, allocation_create_info);
+    }
+    pub fn createImage(
+        self: GraphicsContext,
+        image_create_info: vk.ImageCreateInfo,
+        allocation_create_info: vma.AllocatorCreateInfo,
+    ) !vma.CreateImageResult {
+        return self.allocator.createImage(image_create_info, allocation_create_info);
     }
 };
 
+
+fn CreateInfoToType(comptime T: type) type {
+    const des_type_name = @typeName(T);
+    const resource_name = blk: {
+        if (std.mem.indexOf(u8, des_type_name, "CreateInfo")) |index| {
+            if (std.mem.indexOf(u8, des_type_name, "Pipeline") != null and
+                std.mem.indexOf(u8, des_type_name, "Layout") == null)
+            {
+                break :blk "Pipeline";
+            }
+
+            const end = index + 10;
+            if (end == des_type_name.len or des_type_name[end] == '2') {
+                break :blk des_type_name[0..index];
+            }
+
+            break :blk des_type_name[0..index] ++ des_type_name[end..];
+        }
+        @compileError("Can't create resource with " ++ des_type_name);
+    };
+    return @field(vk, resource_name);
+}
 pub const Queue = struct {
     handle: vk.Queue,
     family: u32,
@@ -359,20 +483,20 @@ fn checkExtensionSupport(
 /// ---------- Instance Dispatch ---------------
 /// vma_vulkan_func.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties
 /// vma_vulkan_func.vkGetPhysicalDeviceProperties       = vkGetPhysicalDeviceProperties
-fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VmaVulkanFunctions {
-    var vma_vulkan_func: vma.VmaVulkanFunctions = undefined;
+fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VulkanFunctions {
+    var vma_vulkan_func: vma.VulkanFunctions = undefined;
 
     // Instance Vma
     inline for (instance_vma) |cmd| {
         const name = comptime vk.InstanceCommand.symbol(cmd);
-        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ " in VmaVulkanFunctions");
+        if (!@hasField(vma.VulkanFunctions, name)) @compileError("No function " ++ name ++ " in Vma VulkanFunctions");
         @field(vma_vulkan_func, name) = @field(vki.dispatch, name);
     }
 
     // Device Vma
     inline for (device_vma) |cmd| {
         const name = comptime vk.DeviceCommand.symbol(cmd);
-        if (!@hasField(vma.VmaVulkanFunctions, name)) @compileError("No function " ++ name ++ " in VmaVulkanFunctions");
+        if (!@hasField(vma.VulkanFunctions, name)) @compileError("No function " ++ name ++ " in Vma VulkanFunctions");
         @field(vma_vulkan_func, name) = @field(vkd.dispatch, name);
     }
     return vma_vulkan_func;

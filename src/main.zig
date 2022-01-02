@@ -98,49 +98,23 @@ pub fn main() !void {
     }, null);
     defer gc.vkd.destroyCommandPool(gc.dev, pool, null);
 
-    // const buffer = try gc.vkd.createBuffer(gc.dev, &.{
-    //     .flags = .{},
-    //     .size = @sizeOf(@TypeOf(vertices)),
-    //     .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-    //     .sharing_mode = .exclusive,
-    //     .queue_family_index_count = 0,
-    //     .p_queue_family_indices = undefined,
-    // }, null);
-
-    var allocation: vma.VmaAllocation = undefined;
-    var buffer: vk.Buffer = undefined;
-    const vaci = vma.VmaAllocationCreateInfo{
-        .flags = vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = vma.VMA_MEMORY_USAGE_CPU_TO_GPU,
-        .requiredFlags = .{},
-        .preferredFlags = .{},
-        .memoryTypeBits = 0,
-        .pool = .null_handle,
-        .pUserData = null,
-        .priority = 0,
-    };
-    try checkError(vma.vmaCreateBuffer(gc.allocator, &.{
+    const vertex_buffer = try gc.allocator.createBuffer(.{
         .flags = .{},
         .size = @sizeOf(@TypeOf(vertices)),
         .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
-    }, &vaci, &buffer, &allocation, null));
-    defer vma.vmaDestroyBuffer(gc.allocator, buffer, allocation);
-    // defer gc.vkd.destroyBuffer(gc.dev, buffer, null);
-    const mem_reqs = gc.vkd.getBufferMemoryRequirements(gc.dev, buffer);
-    const memory = try gc.allocate(mem_reqs, .{ .device_local_bit = true });
-    defer gc.vkd.freeMemory(gc.dev, memory, null);
-    try gc.vkd.bindBufferMemory(gc.dev, buffer, memory, 0);
+    }, .{ .usage = .gpu_only });
+    defer gc.destroy(vertex_buffer);
 
-    try uploadVertices(&gc, pool, buffer);
+    try uploadVertices(&gc, pool, vertex_buffer.buffer);
 
     var cmdbufs = try createCommandBuffers(
         &gc,
         pool,
         allocator,
-        buffer,
+        vertex_buffer.buffer,
         swapchain.extent,
         render_pass,
         pipeline,
@@ -170,7 +144,7 @@ pub fn main() !void {
                 &gc,
                 pool,
                 allocator,
-                buffer,
+                vertex_buffer.buffer,
                 swapchain.extent,
                 render_pass,
                 pipeline,
@@ -185,31 +159,27 @@ pub fn main() !void {
 }
 
 fn uploadVertices(gc: *const GraphicsContext, pool: vk.CommandPool, buffer: vk.Buffer) !void {
-    const staging_buffer = try gc.vkd.createBuffer(gc.dev, &.{
+    const size = @sizeOf(@TypeOf(vertices));
+    const stage_result = try gc.allocator.createBuffer(.{
         .flags = .{},
-        .size = @sizeOf(@TypeOf(vertices)),
+        .size = size,
         .usage = .{ .transfer_src_bit = true },
         .sharing_mode = .exclusive,
         .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
-    }, null);
-    defer gc.vkd.destroyBuffer(gc.dev, staging_buffer, null);
-    const mem_reqs = gc.vkd.getBufferMemoryRequirements(gc.dev, staging_buffer);
-    const staging_memory = try gc.allocate(mem_reqs, .{ .host_visible_bit = true, .host_coherent_bit = true });
-    defer gc.vkd.freeMemory(gc.dev, staging_memory, null);
-    try gc.vkd.bindBufferMemory(gc.dev, staging_buffer, staging_memory, 0);
-
+    }, .{ .usage = .cpu_to_gpu });
+    defer gc.destroy(stage_result);
     {
-        const data = try gc.vkd.mapMemory(gc.dev, staging_memory, 0, vk.WHOLE_SIZE, .{});
-        defer gc.vkd.unmapMemory(gc.dev, staging_memory);
+        const data = try gc.allocator.mapMemory(stage_result.allocation, Vertex);
+        defer gc.allocator.unmapMemory(stage_result.allocation);
 
-        const gpu_vertices = @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data));
         for (vertices) |vertex, i| {
-            gpu_vertices[i] = vertex;
+            data[i] = vertex;
         }
+        try gc.allocator.flushAllocation(stage_result.allocation, 0, vk.WHOLE_SIZE);
     }
 
-    try copyBuffer(gc, pool, buffer, staging_buffer, @sizeOf(@TypeOf(vertices)));
+    try copyBuffer(gc, pool, buffer, stage_result.buffer, size);
 }
 
 fn copyBuffer(gc: *const GraphicsContext, pool: vk.CommandPool, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {

@@ -74,8 +74,8 @@ pub const Swapchain = struct {
         const swap_images = try initSwapchainImages(gc, handle, surface_format.format, allocator);
         errdefer for (swap_images) |si| si.deinit(gc);
 
-        var next_image_acquired = try gc.vkd.createSemaphore(gc.dev, &.{ .flags = .{} }, null);
-        errdefer gc.vkd.destroySemaphore(gc.dev, next_image_acquired, null);
+        var next_image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} });
+        errdefer gc.destroy(next_image_acquired);
 
         const result = try gc.vkd.acquireNextImageKHR(gc.dev, handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
         if (result.result != .success) {
@@ -98,7 +98,7 @@ pub const Swapchain = struct {
 
     fn deinitExceptSwapchain(self: Swapchain) void {
         for (self.swap_images) |si| si.deinit(self.gc);
-        self.gc.vkd.destroySemaphore(self.gc.dev, self.next_image_acquired, null);
+        self.gc.destroy(self.next_image_acquired);
     }
 
     pub fn waitForAllFences(self: Swapchain) !void {
@@ -199,7 +199,7 @@ const SwapImage = struct {
     frame_fence: vk.Fence,
 
     fn init(gc: *const GraphicsContext, image: vk.Image, format: vk.Format) !SwapImage {
-        const view = try gc.vkd.createImageView(gc.dev, &.{
+        const view = try gc.create(vk.ImageViewCreateInfo{
             .flags = .{},
             .image = image,
             .view_type = .@"2d",
@@ -212,17 +212,17 @@ const SwapImage = struct {
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
-        }, null);
-        errdefer gc.vkd.destroyImageView(gc.dev, view, null);
+        });
+        errdefer gc.destroy(view);
 
-        const image_acquired = try gc.vkd.createSemaphore(gc.dev, &.{ .flags = .{} }, null);
-        errdefer gc.vkd.destroySemaphore(gc.dev, image_acquired, null);
+        const image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} });
+        errdefer gc.destroy(image_acquired);
 
-        const render_finished = try gc.vkd.createSemaphore(gc.dev, &.{ .flags = .{} }, null);
-        errdefer gc.vkd.destroySemaphore(gc.dev, image_acquired, null);
+        const render_finished = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} });
+        errdefer gc.destroy(render_finished);
 
-        const frame_fence = try gc.vkd.createFence(gc.dev, &.{ .flags = .{ .signaled_bit = true } }, null);
-        errdefer gc.vkd.destroyFence(gc.dev, frame_fence, null);
+        const frame_fence = try gc.create(vk.FenceCreateInfo{ .flags = .{ .signaled_bit = true } });
+        errdefer gc.destroy(frame_fence);
 
         return SwapImage{
             .image = image,
@@ -235,10 +235,10 @@ const SwapImage = struct {
 
     fn deinit(self: SwapImage, gc: *const GraphicsContext) void {
         self.waitForFence(gc) catch return;
-        gc.vkd.destroyImageView(gc.dev, self.view, null);
-        gc.vkd.destroySemaphore(gc.dev, self.image_acquired, null);
-        gc.vkd.destroySemaphore(gc.dev, self.render_finished, null);
-        gc.vkd.destroyFence(gc.dev, self.frame_fence, null);
+        gc.destroy(self.view);
+        gc.destroy(self.image_acquired);
+        gc.destroy(self.render_finished);
+        gc.destroy(self.frame_fence);
     }
 
     fn waitForFence(self: SwapImage, gc: *const GraphicsContext) !void {
