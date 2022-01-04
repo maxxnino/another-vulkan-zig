@@ -1,10 +1,16 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const vma = @import("vma.zig");
 const Allocator = std.mem.Allocator;
+const Buffer = @import("Buffer.zig");
 
 const required_device_extensions = [_][]const u8{vk.extension_info.khr_swapchain.name};
+
+const validation_extensions = [_][*:0]const u8{
+    "VK_LAYER_KHRONOS_validation",
+};
 
 const BaseDispatch = vk.BaseWrapper(&.{
     .createInstance,
@@ -34,17 +40,19 @@ const device_vma = [_]vk.DeviceCommand{
     .getBufferMemoryRequirements2,
 };
 const device_command = [_]vk.DeviceCommand{
-    .destroyDevice,           .getDeviceQueue,        .createSemaphore,     .createFence,
-    .createImageView,         .destroyImageView,      .destroySemaphore,    .destroyFence,
-    .getSwapchainImagesKHR,   .createSwapchainKHR,    .destroySwapchainKHR, .acquireNextImageKHR,
-    .deviceWaitIdle,          .waitForFences,         .resetFences,         .queueSubmit,
-    .queuePresentKHR,         .createCommandPool,     .destroyCommandPool,  .allocateCommandBuffers,
-    .freeCommandBuffers,      .queueWaitIdle,         .createShaderModule,  .destroyShaderModule,
-    .createPipelineLayout,    .destroyPipelineLayout, .createRenderPass,    .destroyRenderPass,
-    .createGraphicsPipelines, .destroyPipeline,       .createFramebuffer,   .destroyFramebuffer,
-    .beginCommandBuffer,      .endCommandBuffer,      .cmdBeginRenderPass,  .cmdEndRenderPass,
-    .cmdBindPipeline,         .cmdDraw,               .cmdSetViewport,      .cmdSetScissor,
-    .cmdBindVertexBuffers,
+    .destroyDevice,             .getDeviceQueue,             .createSemaphore,      .createFence,
+    .createImageView,           .destroyImageView,           .destroySemaphore,     .destroyFence,
+    .getSwapchainImagesKHR,     .createSwapchainKHR,         .destroySwapchainKHR,  .acquireNextImageKHR,
+    .deviceWaitIdle,            .waitForFences,              .resetFences,          .queueSubmit,
+    .queuePresentKHR,           .createCommandPool,          .destroyCommandPool,   .allocateCommandBuffers,
+    .freeCommandBuffers,        .queueWaitIdle,              .createShaderModule,   .destroyShaderModule,
+    .createPipelineLayout,      .destroyPipelineLayout,      .createRenderPass,     .destroyRenderPass,
+    .createGraphicsPipelines,   .destroyPipeline,            .createFramebuffer,    .destroyFramebuffer,
+    .createDescriptorSetLayout, .destroyDescriptorSetLayout, .createDescriptorPool, .destroyDescriptorPool,
+    .allocateDescriptorSets,    .updateDescriptorSets,       .beginCommandBuffer,   .endCommandBuffer,
+    .cmdBeginRenderPass,        .cmdEndRenderPass,           .cmdBindPipeline,      .cmdDraw,
+    .cmdSetViewport,            .cmdSetScissor,              .cmdBindVertexBuffers, .cmdBindIndexBuffer,
+    .cmdBindDescriptorSets,     .cmdDrawIndexed,
 } ++ device_vma;
 const DeviceDispatch = vk.DeviceWrapper(&device_command);
 
@@ -58,6 +66,7 @@ pub const GraphicsContext = struct {
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
     mem_props: vk.PhysicalDeviceMemoryProperties,
+    pool: vk.CommandPool,
 
     dev: vk.Device,
     graphics_queue: Queue,
@@ -82,8 +91,11 @@ pub const GraphicsContext = struct {
         self.instance = try self.vkb.createInstance(&.{
             .flags = .{},
             .p_application_info = &app_info,
-            .enabled_layer_count = 0,
-            .pp_enabled_layer_names = undefined,
+            .enabled_layer_count = if (builtin.mode == .Debug) validation_extensions.len else 0,
+            .pp_enabled_layer_names = if (builtin.mode == .Debug) @ptrCast(
+                [*]const [*:0]const u8,
+                &validation_extensions,
+            ) else undefined,
             .enabled_extension_count = @intCast(u32, glfw_exts.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &glfw_exts[0]),
         }, null);
@@ -121,11 +133,18 @@ pub const GraphicsContext = struct {
             .instance = self.instance,
             .vulkanApiVersion = vk.API_VERSION_1_2,
         });
+
+        self.pool = try self.create(vk.CommandPoolCreateInfo{
+            .flags = .{},
+            .queue_family_index = self.graphics_queue.family,
+        });
+
         return self;
     }
 
     pub fn deinit(self: GraphicsContext) void {
         self.allocator.destroy();
+        self.destroy(self.pool);
         self.vkd.destroyDevice(self.dev, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vki.destroyInstance(self.instance, null);
@@ -139,12 +158,10 @@ pub const GraphicsContext = struct {
     pub fn destroy(self: GraphicsContext, resource: anytype) void {
         const ResourceType = @TypeOf(resource);
         const destroyFn = blk: {
-            if (ResourceType == vk.Image or ResourceType == vk.Buffer) {
+            if (ResourceType == vk.Image or ResourceType == vk.Buffer or ResourceType == Buffer) {
                 const name = @typeName(ResourceType);
-                @compileError("Can not destroy single vk." ++ name ++ " need vma.Create" ++ name ++ "Result");
+                @compileError("Can not destroy single vk." ++ name ++ " call " ++ name ++ ".deinit(GraphicsContext) instead");
             }
-            if (ResourceType == vma.CreateBufferResult) return self.allocator.destroyBuffer(resource);
-            if (ResourceType == vma.CreateImageResult) return self.allocator.destroyImage(resource);
             if (ResourceType == vk.Event) break :blk DeviceDispatch.destroyEvent;
             if (ResourceType == vk.Fence) break :blk DeviceDispatch.destroyFence;
             if (ResourceType == vk.Buffer) break :blk DeviceDispatch.destroyBuffer;
@@ -169,8 +186,6 @@ pub const GraphicsContext = struct {
             if (ResourceType == vk.PrivateDataSlotEXT) break :blk DeviceDispatch.destroyPrivateDataSlotEXT;
             if (ResourceType == vk.DescriptorSetLayout) break :blk DeviceDispatch.destroyDescriptorSetLayout;
             if (ResourceType == vk.DeferredOperationKHR) break :blk DeviceDispatch.destroyDeferredOperationKHR;
-            if (ResourceType == vk.RayTracingPipelinesNV) break :blk DeviceDispatch.destroyRayTracingPipelinesNV;
-            if (ResourceType == vk.RayTracingPipelinesKHR) break :blk DeviceDispatch.destroyRayTracingPipelinesKHR;
             if (ResourceType == vk.SamplerYcbcrConversion) break :blk DeviceDispatch.destroySamplerYcbcrConversion;
             if (ResourceType == vk.BufferCollectionFUCHSIA) break :blk DeviceDispatch.destroyBufferCollectionFUCHSIA;
             if (ResourceType == vk.AccelerationStructureNV) break :blk DeviceDispatch.destroyAccelerationStructureNV;
@@ -184,10 +199,9 @@ pub const GraphicsContext = struct {
     pub fn create(self: GraphicsContext, create_info: anytype) !CreateInfoToType(@TypeOf(create_info)) {
         const CreateInfo = @TypeOf(create_info);
         const createFn = blk: {
-            if (CreateInfo == vk.ImageCreateInfo or CreateInfo == vk.BufferCreateInfo) {
-                @compileError("using createImage or createBuffer instead");
+            if (CreateInfo == vk.ImageCreateInfo or CreateInfo == vk.BufferCreateInfo or CreateInfo == Buffer) {
+                @compileError("Don't support " ++ @typeName(CreateInfo));
             }
-
             if (CreateInfo == vk.EventCreateInfo) break :blk DeviceDispatch.createEvent;
             if (CreateInfo == vk.FenceCreateInfo) break :blk DeviceDispatch.createFence;
             if (CreateInfo == vk.SamplerCreateInfo) break :blk DeviceDispatch.createSampler;
@@ -236,25 +250,41 @@ pub const GraphicsContext = struct {
             );
             return pipeline;
         };
-        return try createFn(self.vkd, self.dev, &create_info, null);
+        return createFn(self.vkd, self.dev, &create_info, null);
     }
 
-    pub fn createBuffer(
-        self: GraphicsContext,
-        buffer_create_info: vk.BufferCreateInfo,
-        allocation_create_info: vma.AllocatorCreateInfo,
-    ) !vma.CreateBufferResult {
-        return self.allocator.createBuffer(buffer_create_info, allocation_create_info);
+    pub fn beginOneTimeCommandBuffer(self: GraphicsContext) !vk.CommandBuffer {
+        var cmdbuf: vk.CommandBuffer = undefined;
+        try self.vkd.allocateCommandBuffers(self.dev, &.{
+            .command_pool = self.pool,
+            .level = .primary,
+            .command_buffer_count = 1,
+        }, @ptrCast([*]vk.CommandBuffer, &cmdbuf));
+
+        try self.vkd.beginCommandBuffer(cmdbuf, &.{
+            .flags = .{ .one_time_submit_bit = true },
+            .p_inheritance_info = null,
+        });
+        return cmdbuf;
     }
-    pub fn createImage(
-        self: GraphicsContext,
-        image_create_info: vk.ImageCreateInfo,
-        allocation_create_info: vma.AllocatorCreateInfo,
-    ) !vma.CreateImageResult {
-        return self.allocator.createImage(image_create_info, allocation_create_info);
+
+    pub fn endOneTimeCommandBuffer(self: GraphicsContext, cmdbuf: vk.CommandBuffer) !void {
+        defer self.vkd.freeCommandBuffers(self.dev, self.pool, 1, @ptrCast([*]const vk.CommandBuffer, &cmdbuf));
+        try self.vkd.endCommandBuffer(cmdbuf);
+
+        const si = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = undefined,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &cmdbuf),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        };
+        try self.vkd.queueSubmit(self.graphics_queue.handle, 1, @ptrCast([*]const vk.SubmitInfo, &si), .null_handle);
+        try self.vkd.queueWaitIdle(self.graphics_queue.handle);
     }
 };
-
 
 fn CreateInfoToType(comptime T: type) type {
     const des_type_name = @typeName(T);

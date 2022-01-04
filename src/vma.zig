@@ -177,7 +177,8 @@ pub const MemoryUsage = enum(i32) {
     /// Memory that is both mappable on host (guarantees to be `HOST_VISIBLE`) and preferably fast to access by GPU.
     /// CPU access is typically uncached. Writes may be write-combined.
     ///
-    /// Usage: Resources written frequently by host (dynamic), read by device. E.g. textures, vertex buffers, uniform buffers updated every frame or every draw call.
+    /// Usage: Resources written frequently by host (dynamic), read by device. 
+    /// E.g. textures, vertex buffers, uniform buffers updated every frame or every draw call.
     cpu_to_gpu = 3,
     /// Memory mappable on host (guarantees to be `HOST_VISIBLE`) and cached.
     /// It is roughly equivalent of `D3D12_HEAP_TYPE_READBACK`.
@@ -416,9 +417,7 @@ pub const Allocator = enum(usize) {
     ///
     /// It it safe to pass null as buffer and/or allocation.
     /// fn destroyBuffer(allocator: Allocator, buffer: vk.Buffer, allocation: Allocation) void
-    pub fn destroyBuffer(self: Allocator, result: CreateBufferResult) void {
-        vmaDestroyBuffer(self, result.buffer, result.allocation);
-    }
+    pub const destroyBuffer = vmaDestroyBuffer;
 
     /// Function similar to CreateBuffer().
     pub fn createImage(
@@ -467,9 +466,7 @@ pub const Allocator = enum(usize) {
     /// \endcode
     ///
     /// It is safe to pass null as image and/or allocation.
-    pub fn destroyImage(self: Allocator, result: CreateImageResult) void {
-        vmaDestroyImage(self, result.image, result.allocation);
-    }
+    pub const destroyImage = vmaDestroyImage;
 
     /// \brief Maps memory represented by given allocation and returns pointer to it.
     ///
