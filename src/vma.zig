@@ -876,53 +876,7 @@ pub extern fn vmaTouchAllocation(allocator: Allocator, allocation: Allocation) v
 pub extern fn vmaSetAllocationUserData(allocator: Allocator, allocation: Allocation, pUserData: ?*anyopaque) void;
 pub extern fn vmaCreateLostAllocation(allocator: Allocator, pAllocation: [*c]Allocation) void;
 pub extern fn vmaGetAllocationMemoryProperties(allocator: Allocator, allocation: Allocation, pFlags: [*c]vk.MemoryPropertyFlags) void;
-
-/// Maps memory represented by given allocation and returns pointer to it.
-/// 
-/// Maps memory represented by given allocation to make it accessible to CPU code.
-/// When succeeded, `*ppData` contains pointer to first byte of this memory.
-/// If the allocation is part of bigger `VkDeviceMemory` block, the pointer is
-/// correctly offsetted to the beginning of region assigned to this particular
-/// allocation.
-/// 
-/// Mapping is internally reference-counted and synchronized, so despite raw Vulkan
-/// function `vkMapMemory()` cannot be used to map same block of `VkDeviceMemory`
-/// multiple times simultaneously, it is safe to call this function on allocations
-/// assigned to the same memory block. Actual Vulkan memory will be mapped on first
-/// mapping and unmapped on last unmapping.
-/// 
-/// If the function succeeded, you must call vmaUnmapMemory() to unmap the
-/// allocation when mapping is no longer needed or before freeing the allocation, at
-/// the latest.
-/// 
-/// It also safe to call this function multiple times on the same allocation. You
-/// must call vmaUnmapMemory() same number of times as you called vmaMapMemory().
-/// 
-/// It is also safe to call this function on allocation created with
-/// #VMA_ALLOCATION_CREATE_MAPPED_BIT flag. Its memory stays mapped all the time.
-/// You must still call vmaUnmapMemory() same number of times as you called
-/// vmaMapMemory(). You must not call vmaUnmapMemory() additional time to free the
-/// "0-th" mapping made automatically due to #VMA_ALLOCATION_CREATE_MAPPED_BIT flag.
-/// 
-/// This function fails when used on allocation made in memory type that is not
-/// `HOST_VISIBLE`.
-/// 
-/// This function always fails when called for allocation that was created with
-/// #VMA_ALLOCATION_CREATE_CAN_BECOME_LOST_BIT flag. Such allocations cannot be
-/// mapped.
-/// 
-/// This function doesn't automatically flush or invalidate caches.
-/// If the allocation is made from a memory types that is not `HOST_COHERENT`,
-/// you also need to use vmaInvalidateAllocation() / vmaFlushAllocation(), as required by Vulkan specification.
 pub extern fn vmaMapMemory(allocator: Allocator, allocation: Allocation, ppData: **anyopaque) vk.Result;
-
-/// Unmaps memory represented by given allocation, mapped previously using vmaMapMemory().
-/// 
-/// For details, see description of vmaMapMemory().
-/// 
-/// This function doesn't automatically flush or invalidate caches.
-/// If the allocation is made from a memory types that is not `HOST_COHERENT`,
-/// you also need to use vmaInvalidateAllocation() / vmaFlushAllocation(), as required by Vulkan specification.
 pub extern fn vmaUnmapMemory(allocator: Allocator, allocation: Allocation) void;
 pub extern fn vmaFlushAllocation(allocator: Allocator, allocation: Allocation, offset: vk.DeviceSize, size: vk.DeviceSize) vk.Result;
 pub extern fn vmaInvalidateAllocation(allocator: Allocator, allocation: Allocation, offset: vk.DeviceSize, size: vk.DeviceSize) vk.Result;
