@@ -99,7 +99,7 @@ pub fn main() !void {
         .flags = .{},
         .binding_count = 1,
         .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &descriptor_binding),
-    });
+    }, "main");
     defer gc.destroy(descriptor_set_layout);
 
     const pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
@@ -108,7 +108,7 @@ pub fn main() !void {
         .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
         .push_constant_range_count = 0,
         .p_push_constant_ranges = undefined,
-    });
+    }, "main");
     defer gc.destroy(pipeline_layout);
 
     const render_pass = try createRenderPass(&gc, swapchain);
@@ -177,7 +177,7 @@ pub fn main() !void {
         .max_sets = frame_size,
         .pool_size_count = 1,
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_size),
-    });
+    }, "main");
     defer gc.destroy(descriptor_pool);
     var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
     for (des_layouts) |*l| {
@@ -332,7 +332,7 @@ fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_p
             .width = swapchain.extent.width,
             .height = swapchain.extent.height,
             .layers = 1,
-        });
+        }, "main");
         i += 1;
     }
 
@@ -383,7 +383,7 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.Render
         .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
         .dependency_count = 0,
         .p_dependencies = undefined,
-    });
+    }, "main");
 }
 
 fn createPipeline(
@@ -395,14 +395,14 @@ fn createPipeline(
         .flags = .{},
         .code_size = resources.triangle_vert.len,
         .p_code = @ptrCast([*]const u32, resources.triangle_vert),
-    });
+    }, "main");
     defer gc.destroy(vert);
 
     const frag = try gc.create(vk.ShaderModuleCreateInfo{
         .flags = .{},
         .code_size = resources.triangle_frag.len,
         .p_code = @ptrCast([*]const u32, resources.triangle_frag),
-    });
+    }, "main");
     defer gc.destroy(frag);
 
     const pssci = [_]vk.PipelineShaderStageCreateInfo{
@@ -515,7 +515,7 @@ fn createPipeline(
         .base_pipeline_index = -1,
     };
 
-    return try gc.create(gpci);
+    return try gc.create(gpci, "main");
 }
 pub fn appendGltfModel(
     arena: Allocator,
