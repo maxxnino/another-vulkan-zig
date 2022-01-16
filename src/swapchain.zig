@@ -1,5 +1,6 @@
 const std = @import("std");
 const vk = @import("vulkan");
+const srcToString = @import("util.zig").srcToString;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Allocator = std.mem.Allocator;
 
@@ -45,6 +46,10 @@ pub const Swapchain = struct {
             .concurrent
         else
             .exclusive;
+        const qfis = if(sharing_mode == .exclusive)
+            qfi[0..0]
+        else
+            qfi[0..1];
 
         const handle = try gc.vkd.createSwapchainKHR(gc.dev, &.{
             .flags = .{},
@@ -56,8 +61,8 @@ pub const Swapchain = struct {
             .image_array_layers = 1,
             .image_usage = .{ .color_attachment_bit = true, .transfer_dst_bit = true },
             .image_sharing_mode = sharing_mode,
-            .queue_family_index_count = qfi.len,
-            .p_queue_family_indices = &qfi,
+            .queue_family_index_count = @truncate(u32,qfis.len),
+            .p_queue_family_indices = qfis.ptr,
             .pre_transform = caps.current_transform,
             .composite_alpha = .{ .opaque_bit_khr = true },
             .present_mode = present_mode,
@@ -74,7 +79,7 @@ pub const Swapchain = struct {
         const swap_images = try initSwapchainImages(gc, handle, surface_format.format, allocator);
         errdefer for (swap_images) |si| si.deinit(gc);
 
-        var next_image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, "swapchain");
+        var next_image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, srcToString(@src()));
         errdefer gc.destroy(next_image_acquired);
 
         const result = try gc.vkd.acquireNextImageKHR(gc.dev, handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
@@ -212,16 +217,16 @@ const SwapImage = struct {
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
-        }, "swapchain");
+        }, srcToString(@src()));
         errdefer gc.destroy(view);
 
-        const image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, "swapchain");
+        const image_acquired = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, srcToString(@src()));
         errdefer gc.destroy(image_acquired);
 
-        const render_finished = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, "swapchain");
+        const render_finished = try gc.create(vk.SemaphoreCreateInfo{ .flags = .{} }, srcToString(@src()));
         errdefer gc.destroy(render_finished);
 
-        const frame_fence = try gc.create(vk.FenceCreateInfo{ .flags = .{ .signaled_bit = true } }, "swapchain");
+        const frame_fence = try gc.create(vk.FenceCreateInfo{ .flags = .{ .signaled_bit = true } }, srcToString(@src()));
         errdefer gc.destroy(frame_fence);
 
         return SwapImage{

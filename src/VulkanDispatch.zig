@@ -25,7 +25,7 @@ const instance_command = [_]vk.InstanceCommand{
     .enumerateDeviceExtensionProperties,      .getPhysicalDeviceSurfaceFormatsKHR,
     .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceCapabilitiesKHR,
     .getPhysicalDeviceQueueFamilyProperties,  .getPhysicalDeviceSurfaceSupportKHR,
-    .getDeviceProcAddr,
+    .getDeviceProcAddr,                       .getPhysicalDeviceFeatures,
 } ++ instance_vma ++ if (enable_safety) instance_debug else [_]vk.InstanceCommand{};
 pub const InstanceDispatch = vk.InstanceWrapper(&instance_command);
 
@@ -36,28 +36,76 @@ const device_debug = [_]vk.DeviceCommand{
     .setDebugUtilsObjectNameEXT,
 };
 const device_vma = [_]vk.DeviceCommand{
-    .allocateMemory,               .bindBufferMemory,
-    .bindImageMemory,              .createBuffer,
-    .destroyBuffer,                .flushMappedMemoryRanges,
-    .freeMemory,                   .getBufferMemoryRequirements,
-    .getImageMemoryRequirements,   .mapMemory,
-    .unmapMemory,                  .cmdCopyBuffer,
+    .createImage,
+    .createBuffer,
+    .destroyImage,
+    .destroyBuffer,
+    .cmdCopyBuffer,
+    .bindImageMemory,
+    .bindBufferMemory,
+    .getImageMemoryRequirements2,
     .getBufferMemoryRequirements2,
+    .mapMemory,
+    .freeMemory,
+    .unmapMemory,
+    .allocateMemory,
+    .flushMappedMemoryRanges,
 };
 const device_command = [_]vk.DeviceCommand{
-    .destroyDevice,             .getDeviceQueue,             .createSemaphore,      .createFence,
-    .createImageView,           .destroyImageView,           .destroySemaphore,     .destroyFence,
-    .getSwapchainImagesKHR,     .createSwapchainKHR,         .destroySwapchainKHR,  .acquireNextImageKHR,
-    .deviceWaitIdle,            .waitForFences,              .resetFences,          .queueSubmit,
-    .queuePresentKHR,           .createCommandPool,          .destroyCommandPool,   .allocateCommandBuffers,
-    .freeCommandBuffers,        .queueWaitIdle,              .createShaderModule,   .destroyShaderModule,
-    .createPipelineLayout,      .destroyPipelineLayout,      .createRenderPass,     .destroyRenderPass,
-    .createGraphicsPipelines,   .destroyPipeline,            .createFramebuffer,    .destroyFramebuffer,
-    .createDescriptorSetLayout, .destroyDescriptorSetLayout, .createDescriptorPool, .destroyDescriptorPool,
-    .allocateDescriptorSets,    .updateDescriptorSets,       .beginCommandBuffer,   .endCommandBuffer,
-    .cmdBeginRenderPass,        .cmdEndRenderPass,           .cmdBindPipeline,      .cmdDraw,
-    .cmdSetViewport,            .cmdSetScissor,              .cmdBindVertexBuffers, .cmdBindIndexBuffer,
-    .cmdBindDescriptorSets,     .cmdDrawIndexed,
+    .destroyDevice,
+    .getDeviceQueue,
+    .createSemaphore,
+    .createFence,
+    .createImageView,
+    .destroyImageView,
+    .destroySemaphore,
+    .destroyFence,
+    .getSwapchainImagesKHR,
+    .createSwapchainKHR,
+    .destroySwapchainKHR,
+    .acquireNextImageKHR,
+    .deviceWaitIdle,
+    .waitForFences,
+    .resetFences,
+    .queueSubmit,
+    .queuePresentKHR,
+    .createCommandPool,
+    .destroyCommandPool,
+    .allocateCommandBuffers,
+    .freeCommandBuffers,
+    .queueWaitIdle,
+    .createShaderModule,
+    .destroyShaderModule,
+    .createPipelineLayout,
+    .destroyPipelineLayout,
+    .createRenderPass,
+    .destroyRenderPass,
+    .createGraphicsPipelines,
+    .destroyPipeline,
+    .createFramebuffer,
+    .destroyFramebuffer,
+    .createDescriptorSetLayout,
+    .destroyDescriptorSetLayout,
+    .createSampler,
+    .destroySampler,
+    .createDescriptorPool,
+    .destroyDescriptorPool,
+    .allocateDescriptorSets,
+    .updateDescriptorSets,
+    .beginCommandBuffer,
+    .endCommandBuffer,
+    .cmdDraw,
+    .cmdSetScissor,
+    .cmdSetViewport,
+    .cmdDrawIndexed,
+    .cmdBindPipeline,
+    .cmdEndRenderPass,
+    .cmdBeginRenderPass,
+    .cmdPipelineBarrier,
+    .cmdBindIndexBuffer,
+    .cmdCopyBufferToImage,
+    .cmdBindVertexBuffers,
+    .cmdBindDescriptorSets,
 } ++ device_vma ++ if (enable_safety) device_debug else [_]vk.InstanceCommand{};
 pub const DeviceDispatch = vk.DeviceWrapper(&device_command);
 
@@ -91,7 +139,7 @@ pub fn destroy(vkd: DeviceDispatch, dev: vk.Device, resource: anytype) void {
     @field(DestroyLookupTable, name)(vkd, dev, resource, null);
 }
 
-pub fn create(vkd: DeviceDispatch, dev: vk.Device, create_info: anytype, object_name: ?[:0]const u8) !CreateInfoToType(@TypeOf(create_info)) {
+pub fn create(vkd: DeviceDispatch, dev: vk.Device, create_info: anytype, object_name: ?[*:0]const u8) !CreateInfoToType(@TypeOf(create_info)) {
     _ = object_name;
     const CreateInfo = @TypeOf(create_info);
     const name = @typeName(CreateInfo);
@@ -121,7 +169,7 @@ pub fn create(vkd: DeviceDispatch, dev: vk.Device, create_info: anytype, object_
             try vkd.setDebugUtilsObjectNameEXT(dev, &.{
                 .object_type = tuple[1],
                 .object_handle = @enumToInt(handle),
-                .p_object_name = @ptrCast([*:0]const u8, &value[0]),
+                .p_object_name = value,
             });
         }
     }
@@ -195,7 +243,6 @@ const CreateLookupTable = struct {
     const IndirectCommandsLayoutCreateInfoNV = .{ DeviceDispatch.createIndirectCommandsLayoutNV, vk.ObjectType.indirect_commands_layout_nv };
 };
 
-
 pub fn CreateInfoToType(comptime T: type) type {
     const des_type_name = @typeName(T);
     const resource_name = blk: {
@@ -217,4 +264,3 @@ pub fn CreateInfoToType(comptime T: type) type {
     };
     return @field(vk, resource_name);
 }
-

@@ -3,22 +3,26 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const vma = @import("vma.zig");
-const Allocator = std.mem.Allocator;
 const Buffer = @import("Buffer.zig");
 const VulkanDispatch = @import("VulkanDispatch.zig");
-const enable_safety = VulkanDispatch.enable_safety;
 const BaseDispatch = VulkanDispatch.BaseDispatch;
 const InstanceDispatch = VulkanDispatch.InstanceDispatch;
 const DeviceDispatch = VulkanDispatch.DeviceDispatch;
+const Allocator = std.mem.Allocator;
+const enable_safety = VulkanDispatch.enable_safety;
+const srcToString = @import("util.zig").srcToString;
 
 const required_device_extensions = [_][:0]const u8{
     vk.extension_info.khr_swapchain.name,
     vk.extension_info.ext_descriptor_indexing.name,
-    vk.extension_info.khr_dedicated_allocation.name,
 };
 
 const required_instance_extensions = [_][:0]const u8{
     vk.extension_info.ext_debug_utils.name,
+};
+
+const required_device_feature = vk.PhysicalDeviceFeatures{
+    .sampler_anisotropy = vk.TRUE,
 };
 
 pub const GraphicsContext = struct {
@@ -54,7 +58,7 @@ pub const GraphicsContext = struct {
             .application_version = vk.makeApiVersion(2, 0, 0, 0),
             .p_engine_name = app_name,
             .engine_version = vk.makeApiVersion(0, 0, 0, 0),
-            .api_version = vk.API_VERSION_1_2,
+            .api_version = vk.API_VERSION_1_1,
         };
         var instance_exts = blk: {
             if (enable_safety) {
@@ -77,8 +81,25 @@ pub const GraphicsContext = struct {
             allocator.free(instance_exts);
         };
 
+        const best_practices_validation = blk: {
+            if (enable_safety) {
+                break :blk &vk.ValidationFeaturesEXT{
+                    .enabled_validation_feature_count = 1,
+                    .p_enabled_validation_features = @ptrCast(
+                        [*]const vk.ValidationFeatureEnableEXT,
+                        &vk.ValidationFeatureEnableEXT.best_practices_ext,
+                    ),
+                    .disabled_validation_feature_count = 0,
+                    .p_disabled_validation_features = undefined,
+                };
+            }
+
+            break :blk null;
+        };
+
         self.instance = try self.vkb.createInstance(&.{
             .flags = .{},
+            .p_next = best_practices_validation,
             .p_application_info = &app_info,
             .enabled_layer_count = if (enable_safety) 1 else 0,
             .pp_enabled_layer_names = if (enable_safety) @ptrCast(
@@ -118,6 +139,7 @@ pub const GraphicsContext = struct {
         self.props = candidate.props;
         self.dev = try initializeCandidate(self.vki, candidate, allocator);
         self.vkd = try DeviceDispatch.load(self.dev, self.vki.dispatch.vkGetDeviceProcAddr);
+        try self.markHandle(self.dev, .device, srcToString(@src()));
         errdefer self.vkd.destroyDevice(self.dev, null);
 
         self.graphics_queue = Queue.init(self.vkd, self.dev, candidate.queues.graphics_family);
@@ -134,13 +156,13 @@ pub const GraphicsContext = struct {
             .frameInUseCount = 0,
             .pVulkanFunctions = &vma_fns,
             .instance = self.instance,
-            .vulkanApiVersion = vk.API_VERSION_1_2,
+            .vulkanApiVersion = vk.API_VERSION_1_1,
         });
 
         self.pool = try self.create(vk.CommandPoolCreateInfo{
             .flags = .{},
             .queue_family_index = self.graphics_queue.family,
-        }, "Graphic Context Pool");
+        }, srcToString(@src()));
 
         return self;
     }
@@ -163,7 +185,7 @@ pub const GraphicsContext = struct {
         VulkanDispatch.destroy(self.vkd, self.dev, resource);
     }
 
-    pub fn create(self: GraphicsContext, create_info: anytype, object_name: ?[:0]const u8) !VulkanDispatch.CreateInfoToType(@TypeOf(create_info)) {
+    pub fn create(self: GraphicsContext, create_info: anytype, object_name: ?[*:0]const u8) !VulkanDispatch.CreateInfoToType(@TypeOf(create_info)) {
         return VulkanDispatch.create(self.vkd, self.dev, create_info, object_name);
     }
 
@@ -219,6 +241,27 @@ pub const GraphicsContext = struct {
             _ = try self.vkb.enumerateInstanceExtensionProperties(null, &instance_ext_count, instance_exts.ptr);
             for (instance_exts) |e| {
                 printExtention(e);
+            }
+        }
+    }
+
+    pub fn markCommandBuffer(self: GraphicsContext, command_buffer: vk.CommandBuffer, label: [*:0]const u8) void {
+        if (enable_safety) {
+            self.vkd.cmdInsertDebugUtilsLabelEXT(command_buffer, .{
+                .p_label_name = label,
+                .color = [4]f32{ 0, 0, 0, 0 },
+            });
+        }
+    }
+
+    pub fn markHandle(self: GraphicsContext, handle: anytype, object_type: vk.ObjectType, label: ?[*:0]const u8) !void {
+        if (enable_safety) {
+            if (label) |value| {
+                try self.vkd.setDebugUtilsObjectNameEXT(self.dev, &.{
+                    .object_type = object_type,
+                    .object_handle = @enumToInt(handle),
+                    .p_object_name = value,
+                });
             }
         }
     }
@@ -284,7 +327,7 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate, alloca
         .pp_enabled_layer_names = undefined,
         .enabled_extension_count = @truncate(u32, device_exts.items.len),
         .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &device_exts.items[0]),
-        .p_enabled_features = null,
+        .p_enabled_features = &required_device_feature,
     }, null);
 }
 
@@ -336,6 +379,13 @@ fn checkSuitable(
 
     if (!try checkSurfaceSupport(vki, pdev, surface)) {
         return null;
+    }
+
+    const feature = vki.getPhysicalDeviceFeatures(pdev);
+    inline for (std.meta.fields(vk.PhysicalDeviceFeatures)) |field| {
+        if (@field(required_device_feature, field.name) == vk.TRUE) {
+            if (@field(feature, field.name) == vk.FALSE) return null;
+        }
     }
 
     if (try allocateQueues(vki, pdev, allocator, surface)) |allocation| {
