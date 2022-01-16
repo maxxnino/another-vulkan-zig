@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const vk = @import("vulkan");
 const vma = @import("vma.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
+const srcToString = @import("util.zig").srcToString;
 
 pub const CreateInfo = struct {
     size: vk.DeviceSize,
@@ -17,7 +18,7 @@ allocation: vma.Allocation,
 info: vma.AllocationInfo,
 size: vk.DeviceSize,
 
-pub fn init(gc: GraphicsContext, create_info: CreateInfo) !Buffer {
+pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]const u8) !Buffer {
     var allocation_info: vma.AllocationInfo = undefined;
     const result = try gc.allocator.createBufferAndGetInfo(
         .{
@@ -35,6 +36,7 @@ pub fn init(gc: GraphicsContext, create_info: CreateInfo) !Buffer {
         &allocation_info,
     );
 
+    try gc.markHandle(result.buffer, .buffer, object_name);
     assert(allocation_info.pMappedData == null and !create_info.memory_flags.contains(.{ .create_mapped = true }));
     var buffer: Buffer = undefined;
     buffer.buffer = result.buffer;
@@ -83,5 +85,3 @@ pub fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
 
     try gc.endOneTimeCommandBuffer(cmdbuf);
 }
-
-pub fn copyToImage() void {}
