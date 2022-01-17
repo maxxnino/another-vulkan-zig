@@ -20,7 +20,7 @@ z_near: f32 = 0.1,
 z_far: f32 = 100,
 fov_in_degrees: f32 = 60,
 const rotate_speed: f32 = 85;
-const move_speed: f32 = 12;
+const move_speed: f32 = 2;
 
 pub fn getViewMatrix(self: Camera) Mat4 {
     const target = self.quat.rotateVec(Vec3.forward());
@@ -34,15 +34,15 @@ pub fn getProjMatrix(self: Camera, width: u32, height: u32) Mat4 {
         self.z_near,
         self.z_far,
     );
-    proj.data[1][1] *= -1;
+    // proj.data[1][1] *= -1;
     return proj;
 }
 
 pub fn moveCamera(self: *Camera, window: glfw.Window, dt: f32) void {
     var x_dir: f32 = 0;
     var y_dir: f32 = 0;
-    if (window.getKey(.j) == .press) y_dir += dt;
-    if (window.getKey(.k) == .press) y_dir -= dt;
+    if (window.getKey(.j) == .press) y_dir -= dt;
+    if (window.getKey(.k) == .press) y_dir += dt;
     if (window.getKey(.h) == .press) x_dir += dt;
     if (window.getKey(.l) == .press) x_dir -= dt;
 

@@ -10,6 +10,8 @@ const Buffer = @import("Buffer.zig");
 const Allocator = std.mem.Allocator;
 const RenderCommand = @import("RenderCommand.zig");
 const Camera = @import("Camera.zig");
+const Texture2D = @import("texture.zig").Texture2D;
+const srcToString = @import("util.zig").srcToString;
 
 const z = @import("zalgebra");
 const assert = std.debug.assert;
@@ -45,10 +47,17 @@ const Vertex = struct {
             .format = .r32g32b32_sfloat,
             .offset = @offsetOf(Vertex, "color"),
         },
+        .{
+            .binding = 0,
+            .location = 2,
+            .format = .r32g32_sfloat,
+            .offset = @offsetOf(Vertex, "uv"),
+        },
     };
 
     pos: [2]f32,
     color: [3]f32,
+    uv: [2]f32,
 };
 
 const Mesh = struct {
@@ -58,10 +67,10 @@ const Mesh = struct {
     num_vertices: u32,
 };
 const vertices = [_]Vertex{
-    .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-    .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-    .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
-    .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
+    .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+    .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+    .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
+    .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
 };
 
 const indices_data = [_]u16{ 0, 1, 2, 2, 3, 0 };
@@ -87,19 +96,25 @@ pub fn main() !void {
     var swapchain = try Swapchain.init(&gc, allocator, extent);
     defer swapchain.deinit();
 
-    const descriptor_binding = vk.DescriptorSetLayoutBinding{
+    const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
         .binding = 0,
         .descriptor_type = .uniform_buffer,
         .descriptor_count = 1,
         .stage_flags = .{ .vertex_bit = true },
         .p_immutable_samplers = null,
-    };
+    }, .{
+        .binding = 1,
+        .descriptor_type = .combined_image_sampler,
+        .descriptor_count = 1,
+        .stage_flags = .{ .fragment_bit = true },
+        .p_immutable_samplers = null,
+    } };
 
     const descriptor_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
         .flags = .{},
-        .binding_count = 1,
-        .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &descriptor_binding),
-    }, "main");
+        .binding_count = @truncate(u32, bindings.len),
+        .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &bindings),
+    }, srcToString(@src()));
     defer gc.destroy(descriptor_set_layout);
 
     const pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
@@ -108,7 +123,7 @@ pub fn main() !void {
         .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
         .push_constant_range_count = 0,
         .p_push_constant_ranges = undefined,
-    }, "main");
+    }, srcToString(@src()));
     defer gc.destroy(pipeline_layout);
 
     const render_pass = try createRenderPass(&gc, swapchain);
@@ -126,8 +141,11 @@ pub fn main() !void {
         .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
         .memory_usage = .gpu_only,
         .memory_flags = .{},
-    });
+    }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
+
+    const texture = try Texture2D.loadFromFile(gc, "assets/texture.png", .{.anisotropy = true});
+    defer texture.deinit(gc);
 
     var camera = Camera{
         .pitch = 0,
@@ -143,7 +161,7 @@ pub fn main() !void {
             .buffer_usage = .{ .uniform_buffer_bit = true },
             .memory_usage = .cpu_to_gpu,
             .memory_flags = .{},
-        });
+        }, srcToString(@src()));
         try ubo.update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
             .view = camera.getViewMatrix(),
@@ -159,7 +177,7 @@ pub fn main() !void {
         .buffer_usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
         .memory_usage = .gpu_only,
         .memory_flags = .{},
-    });
+    }, srcToString(@src()));
     defer index_buffer.deinit(gc);
 
     // uploadVertices
@@ -168,16 +186,19 @@ pub fn main() !void {
     try uploadData(u16, gc, index_buffer, &indices_data);
 
     // Desciptor Set
-    const pool_size = vk.DescriptorPoolSize{
+    const pool_sizes = [_]vk.DescriptorPoolSize{ .{
         .@"type" = .uniform_buffer,
         .descriptor_count = frame_size,
-    };
+    }, .{
+        .@"type" = .combined_image_sampler,
+        .descriptor_count = frame_size,
+    } };
     const descriptor_pool = try gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
         .max_sets = frame_size,
-        .pool_size_count = 1,
-        .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_size),
-    }, "main");
+        .pool_size_count = @truncate(u32, pool_sizes.len),
+        .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
+    }, srcToString(@src()));
     defer gc.destroy(descriptor_pool);
     var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
     for (des_layouts) |*l| {
@@ -194,7 +215,7 @@ pub fn main() !void {
     defer allocator.free(des_sets);
     try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, des_sets.ptr);
     for (des_sets) |ds, i| {
-        updateDescriptorSet(gc, ds, ubo_buffers[i]);
+        updateDescriptorSet(gc, ds, ubo_buffers[i], texture);
     }
     //End descriptor set
 
@@ -263,29 +284,46 @@ pub fn uploadData(comptime T: type, gc: GraphicsContext, buffer: Buffer, data: [
         .buffer_usage = .{ .transfer_src_bit = true },
         .memory_usage = .cpu_to_gpu,
         .memory_flags = .{},
-    });
+    }, srcToString(@src()));
     defer stage_buffer.deinit(gc);
     try stage_buffer.update(T, gc, data);
     try stage_buffer.copyToBuffer(buffer, gc);
 }
 
-fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer) void {
+fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer, texture: Texture2D) void {
     const dbi = vk.DescriptorBufferInfo{
         .buffer = buffer.buffer,
         .offset = 0,
         .range = buffer.size,
     };
-    const wds = vk.WriteDescriptorSet{
-        .dst_set = descriptor_set,
-        .dst_binding = 0,
-        .dst_array_element = 0,
-        .descriptor_count = 1,
-        .descriptor_type = .uniform_buffer,
-        .p_image_info = undefined,
-        .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &dbi),
-        .p_texel_buffer_view = undefined,
+    const dii = vk.DescriptorImageInfo{
+        .sampler = texture.smapler,
+        .image_view = texture.view,
+        .image_layout = texture.image.layout,
     };
-    gc.vkd.updateDescriptorSets(gc.dev, 1, @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
+    const wds = [_]vk.WriteDescriptorSet{
+        .{
+            .dst_set = descriptor_set,
+            .dst_binding = 0,
+            .dst_array_element = 0,
+            .descriptor_count = 1,
+            .descriptor_type = .uniform_buffer,
+            .p_image_info = undefined,
+            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &dbi),
+            .p_texel_buffer_view = undefined,
+        },
+        .{
+            .dst_set = descriptor_set,
+            .dst_binding = 1,
+            .dst_array_element = 0,
+            .descriptor_count = 1,
+            .descriptor_type = .combined_image_sampler,
+            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &dii),
+            .p_buffer_info = undefined,
+            .p_texel_buffer_view = undefined,
+        },
+    };
+    gc.vkd.updateDescriptorSets(gc.dev, @truncate(u32, wds.len), @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
 }
 
 fn buildCommandBuffers(
@@ -332,7 +370,7 @@ fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_p
             .width = swapchain.extent.width,
             .height = swapchain.extent.height,
             .layers = 1,
-        }, "main");
+        }, srcToString(@src()));
         i += 1;
     }
 
@@ -383,7 +421,7 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.Render
         .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
         .dependency_count = 0,
         .p_dependencies = undefined,
-    }, "main");
+    }, srcToString(@src()));
 }
 
 fn createPipeline(
@@ -395,14 +433,14 @@ fn createPipeline(
         .flags = .{},
         .code_size = resources.triangle_vert.len,
         .p_code = @ptrCast([*]const u32, resources.triangle_vert),
-    }, "main");
+    }, srcToString(@src()));
     defer gc.destroy(vert);
 
     const frag = try gc.create(vk.ShaderModuleCreateInfo{
         .flags = .{},
         .code_size = resources.triangle_frag.len,
         .p_code = @ptrCast([*]const u32, resources.triangle_frag),
-    }, "main");
+    }, srcToString(@src()));
     defer gc.destroy(frag);
 
     const pssci = [_]vk.PipelineShaderStageCreateInfo{
@@ -450,7 +488,7 @@ fn createPipeline(
         .rasterizer_discard_enable = vk.FALSE,
         .polygon_mode = .fill,
         .cull_mode = .{ .back_bit = true },
-        .front_face = .clockwise,
+        .front_face = .counter_clockwise,
         .depth_bias_enable = vk.FALSE,
         .depth_bias_constant_factor = 0,
         .depth_bias_clamp = 0,
@@ -515,7 +553,7 @@ fn createPipeline(
         .base_pipeline_index = -1,
     };
 
-    return try gc.create(gpci, "main");
+    return try gc.create(gpci, srcToString(@src()));
 }
 pub fn appendGltfModel(
     arena: Allocator,

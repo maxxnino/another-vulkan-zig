@@ -70,8 +70,7 @@ pub fn deinit(self: Image, gc: GraphicsContext) void {
     gc.allocator.destroyImage(self.image, self.allocation);
 }
 
-pub fn changeLayout(self: *Image, info: ChangeLayoutInfo, gc: GraphicsContext) !void {
-    const cmdbuf = try gc.beginOneTimeCommandBuffer();
+pub fn changeLayout(self: *Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, info: ChangeLayoutInfo) void {
     const barrier = vk.ImageMemoryBarrier{
         .src_access_mask = info.src_access_mask,
         .dst_access_mask = info.dst_access_mask,
@@ -101,11 +100,10 @@ pub fn changeLayout(self: *Image, info: ChangeLayoutInfo, gc: GraphicsContext) !
         @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
     );
 
-    try gc.endOneTimeCommandBuffer(cmdbuf);
     self.layout = info.new_layout;
 }
 
-pub fn copyFromBuffer(self: Image, src: Buffer, width: u32, height: u32, gc: GraphicsContext) !void {
+pub fn copyFromBuffer(self: Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, src: Buffer, width: u32, height: u32) void {
     const bic = vk.BufferImageCopy{
         .buffer_offset = 0,
         .buffer_row_length = 0,
@@ -127,7 +125,6 @@ pub fn copyFromBuffer(self: Image, src: Buffer, width: u32, height: u32, gc: Gra
             .depth = 1,
         },
     };
-    const cmdbuf = try gc.beginOneTimeCommandBuffer();
     gc.vkd.cmdCopyBufferToImage(
         cmdbuf,
         src.buffer,
@@ -136,7 +133,6 @@ pub fn copyFromBuffer(self: Image, src: Buffer, width: u32, height: u32, gc: Gra
         1,
         @ptrCast([*]const vk.BufferImageCopy, &bic),
     );
-    try gc.endOneTimeCommandBuffer(cmdbuf);
 }
 // pub fn update(self: Buffer, comptime T: type, gc: GraphicsContext, in_data: []const T) !void {
 //     const gpu_mem = if (self.info.pMappedData) |data|
