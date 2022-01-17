@@ -16,18 +16,10 @@ pub const CreateInfo = struct {
     samples: vk.SampleCountFlags,
     tiling: vk.ImageTiling,
     usage: vk.ImageUsageFlags,
-    initial_layout: vk.ImageLayout,
     memory_usage: vma.MemoryUsage,
     memory_flags: vma.AllocationCreateFlags,
 };
 
-const ChangeLayoutInfo = struct {
-    new_layout: vk.ImageLayout,
-    src_access_mask: vk.AccessFlags,
-    dst_access_mask: vk.AccessFlags,
-    src_stage_mask: vk.PipelineStageFlags,
-    dst_stage_mask: vk.PipelineStageFlags,
-};
 const Image = @This();
 image: vk.Image,
 allocation: vma.Allocation,
@@ -46,7 +38,7 @@ pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]con
             .samples = create_info.samples,
             .tiling = create_info.tiling,
             .usage = create_info.usage,
-            .initial_layout = create_info.initial_layout,
+            .initial_layout = .@"undefined",
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
@@ -61,8 +53,8 @@ pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]con
     var image: Image = undefined;
     image.image = result.image;
     image.allocation = result.allocation;
-    image.layout = create_info.initial_layout;
     image.format = create_info.format;
+    image.layout = .@"undefined";
     return image;
 }
 
@@ -70,27 +62,31 @@ pub fn deinit(self: Image, gc: GraphicsContext) void {
     gc.allocator.destroyImage(self.image, self.allocation);
 }
 
-pub fn changeLayout(self: *Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, info: ChangeLayoutInfo) void {
+pub fn changeLayout(
+    self: *Image,
+    gc: GraphicsContext,
+    cmdbuf: vk.CommandBuffer,
+    new_layout: vk.ImageLayout,
+    src_access_mask: vk.AccessFlags,
+    dst_access_mask: vk.AccessFlags,
+    src_stage_mask: vk.PipelineStageFlags,
+    dst_stage_mask: vk.PipelineStageFlags,
+    subresource_range: vk.ImageSubresourceRange,
+) void {
     const barrier = vk.ImageMemoryBarrier{
-        .src_access_mask = info.src_access_mask,
-        .dst_access_mask = info.dst_access_mask,
+        .src_access_mask = src_access_mask,
+        .dst_access_mask = dst_access_mask,
         .old_layout = self.layout,
-        .new_layout = info.new_layout,
+        .new_layout = new_layout,
         .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
         .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
         .image = self.image,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
+        .subresource_range = subresource_range,
     };
     gc.vkd.cmdPipelineBarrier(
         cmdbuf,
-        info.src_stage_mask,
-        info.dst_stage_mask,
+        src_stage_mask,
+        dst_stage_mask,
         .{},
         0,
         undefined,
@@ -100,7 +96,7 @@ pub fn changeLayout(self: *Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer,
         @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
     );
 
-    self.layout = info.new_layout;
+    self.layout = new_layout;
 }
 
 pub fn copyFromBuffer(self: Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, src: Buffer, width: u32, height: u32) void {

@@ -10,7 +10,8 @@ const Buffer = @import("Buffer.zig");
 const Allocator = std.mem.Allocator;
 const RenderCommand = @import("RenderCommand.zig");
 const Camera = @import("Camera.zig");
-const Texture2D = @import("texture.zig").Texture2D;
+const tex = @import("texture.zig");
+const Texture2D = tex.Texture2D;
 const srcToString = @import("util.zig").srcToString;
 
 const z = @import("zalgebra");
@@ -38,7 +39,7 @@ const Vertex = struct {
         .{
             .binding = 0,
             .location = 0,
-            .format = .r32g32_sfloat,
+            .format = .r32g32b32_sfloat,
             .offset = @offsetOf(Vertex, "pos"),
         },
         .{
@@ -55,7 +56,7 @@ const Vertex = struct {
         },
     };
 
-    pos: [2]f32,
+    pos: [3]f32,
     color: [3]f32,
     uv: [2]f32,
 };
@@ -67,13 +68,21 @@ const Mesh = struct {
     num_vertices: u32,
 };
 const vertices = [_]Vertex{
-    .{ .pos = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-    .{ .pos = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-    .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
-    .{ .pos = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
+    .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+    .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+    .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
+    .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
+
+    .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+    .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+    .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
+    .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
 };
 
-const indices_data = [_]u16{ 0, 1, 2, 2, 3, 0 };
+const indices_data = [_]u16{
+    4, 5, 6, 6, 7, 4,
+    0, 1, 2, 2, 3, 0,
+};
 
 pub fn main() !void {
     try glfw.init(.{});
@@ -95,6 +104,14 @@ pub fn main() !void {
 
     var swapchain = try Swapchain.init(&gc, allocator, extent);
     defer swapchain.deinit();
+
+    const depth = try tex.DepthStencilTexture.init(
+        gc,
+        swapchain.extent.width,
+        swapchain.extent.height,
+        srcToString(@src()),
+    );
+    defer depth.deinit(gc);
 
     const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
         .binding = 0,
@@ -126,13 +143,13 @@ pub fn main() !void {
     }, srcToString(@src()));
     defer gc.destroy(pipeline_layout);
 
-    const render_pass = try createRenderPass(&gc, swapchain);
+    const render_pass = try createRenderPass(&gc, swapchain, depth);
     defer gc.destroy(render_pass);
 
     var pipeline = try createPipeline(&gc, pipeline_layout, render_pass);
     defer gc.destroy(pipeline);
 
-    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
+    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth);
     defer destroyFramebuffers(&gc, allocator, framebuffers);
     const frame_size = @truncate(u32, framebuffers.len);
 
@@ -144,7 +161,7 @@ pub fn main() !void {
     }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
 
-    const texture = try Texture2D.loadFromFile(gc, "assets/texture.png", .{.anisotropy = true});
+    const texture = try Texture2D.loadFromFile(gc, "assets/texture.png", .{ .anisotropy = true });
     defer texture.deinit(gc);
 
     var camera = Camera{
@@ -256,7 +273,7 @@ pub fn main() !void {
             try swapchain.recreate(extent);
 
             destroyFramebuffers(&gc, allocator, framebuffers);
-            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain);
+            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth);
 
             render_command.deinit(gc, allocator);
             render_command = try RenderCommand.init(
@@ -354,7 +371,13 @@ fn buildCommandBuffers(
     }
 }
 
-fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_pass: vk.RenderPass, swapchain: Swapchain) ![]vk.Framebuffer {
+fn createFramebuffers(
+    gc: *const GraphicsContext,
+    allocator: Allocator,
+    render_pass: vk.RenderPass,
+    swapchain: Swapchain,
+    depth: tex.DepthStencilTexture,
+) ![]vk.Framebuffer {
     const framebuffers = try allocator.alloc(vk.Framebuffer, swapchain.swap_images.len);
     errdefer allocator.free(framebuffers);
 
@@ -365,8 +388,11 @@ fn createFramebuffers(gc: *const GraphicsContext, allocator: Allocator, render_p
         fb.* = try gc.create(vk.FramebufferCreateInfo{
             .flags = .{},
             .render_pass = render_pass,
-            .attachment_count = 1,
-            .p_attachments = @ptrCast([*]const vk.ImageView, &swapchain.swap_images[i].view),
+            .attachment_count = 2,
+            .p_attachments = @ptrCast([*]const vk.ImageView, &[_]vk.ImageView{
+                swapchain.swap_images[i].view,
+                depth.view,
+            }),
             .width = swapchain.extent.width,
             .height = swapchain.extent.height,
             .layers = 1,
@@ -382,24 +408,39 @@ fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebu
     allocator.free(framebuffers);
 }
 
-fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.RenderPass {
-    const color_attachment = vk.AttachmentDescription{
-        .flags = .{},
-        .format = swapchain.surface_format.format,
-        .samples = .{ .@"1_bit" = true },
-        .load_op = .clear,
-        .store_op = .store,
-        .stencil_load_op = .dont_care,
-        .stencil_store_op = .dont_care,
-        .initial_layout = .@"undefined",
-        .final_layout = .present_src_khr,
+fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex.DepthStencilTexture) !vk.RenderPass {
+    const attachments = [_]vk.AttachmentDescription{
+        .{
+            .flags = .{},
+            .format = swapchain.surface_format.format,
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .@"undefined",
+            .final_layout = .present_src_khr,
+        },
+        .{
+            .flags = .{},
+            .format = depth.image.format,
+            .samples = .{ .@"1_bit" = true },
+            .load_op = .clear,
+            .store_op = .store,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .@"undefined",
+            .final_layout = depth.image.layout,
+        },
     };
-
     const color_attachment_ref = vk.AttachmentReference{
         .attachment = 0,
         .layout = .color_attachment_optimal,
     };
-
+    const depth_attachment_ref = vk.AttachmentReference{
+        .attachment = 1,
+        .layout = depth.image.layout,
+    };
     const subpass = vk.SubpassDescription{
         .flags = .{},
         .pipeline_bind_point = .graphics,
@@ -408,15 +449,15 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain) !vk.Render
         .color_attachment_count = 1,
         .p_color_attachments = @ptrCast([*]const vk.AttachmentReference, &color_attachment_ref),
         .p_resolve_attachments = null,
-        .p_depth_stencil_attachment = null,
+        .p_depth_stencil_attachment = &depth_attachment_ref,
         .preserve_attachment_count = 0,
         .p_preserve_attachments = undefined,
     };
 
     return try gc.create(vk.RenderPassCreateInfo{
         .flags = .{},
-        .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.AttachmentDescription, &color_attachment),
+        .attachment_count = @truncate(u32, attachments.len),
+        .p_attachments = @ptrCast([*]const vk.AttachmentDescription, &attachments),
         .subpass_count = 1,
         .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
         .dependency_count = 0,
@@ -532,6 +573,18 @@ fn createPipeline(
         .dynamic_state_count = dynstate.len,
         .p_dynamic_states = &dynstate,
     };
+    const pdssci = vk.PipelineDepthStencilStateCreateInfo{
+        .flags = .{},
+        .depth_test_enable = vk.TRUE,
+        .depth_write_enable = vk.TRUE,
+        .depth_compare_op = .less,
+        .depth_bounds_test_enable = vk.FALSE,
+        .stencil_test_enable = vk.FALSE,
+        .front = undefined,
+        .back = undefined,
+        .min_depth_bounds = undefined,
+        .max_depth_bounds = undefined,
+    };
 
     const gpci = vk.GraphicsPipelineCreateInfo{
         .flags = .{},
@@ -543,7 +596,7 @@ fn createPipeline(
         .p_viewport_state = &pvsci,
         .p_rasterization_state = &prsci,
         .p_multisample_state = &pmsci,
-        .p_depth_stencil_state = null,
+        .p_depth_stencil_state = &pdssci,
         .p_color_blend_state = &pcbsci,
         .p_dynamic_state = &pdsci,
         .layout = layout,
