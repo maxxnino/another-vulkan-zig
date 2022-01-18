@@ -32,6 +32,7 @@ pub const Texture2D = struct {
         }, filename);
         defer stage_buffer.deinit(gc);
         try stage_buffer.update(u8, gc, data.pixels);
+        const mip_levels = if (opts.mip_map) calcMipLevel(data.width, data.height) else 1;
         texture.image = try Image.init(gc, .{
             .flags = .{},
             .image_type = .@"2d",
@@ -41,47 +42,63 @@ pub const Texture2D = struct {
                 .height = data.height,
                 .depth = 1,
             },
-            .mip_levels = 1,
+            .mip_levels = mip_levels,
             .array_layers = 1,
             .samples = .{ .@"1_bit" = true },
             .tiling = .optimal,
             .usage = .{
+                .transfer_src_bit = true,
                 .transfer_dst_bit = true,
                 .sampled_bit = true,
             },
             .memory_usage = .gpu_only,
             .memory_flags = .{},
         }, filename);
-        const subresource_range = vk.ImageSubresourceRange{
+        var subresource_range = vk.ImageSubresourceRange{
             .aspect_mask = .{ .color_bit = true },
             .base_mip_level = 0,
+            // Only copy to the first layer, so level count 1,
             .level_count = 1,
             .base_array_layer = 0,
             .layer_count = 1,
         };
 
         const cmdbuf = try gc.beginOneTimeCommandBuffer();
+
+        // Optimal image will be used as destination for the copy, so we must transfer from
+        // our initial undefined image layout to the transfer destination layout
         texture.image.changeLayout(
             gc,
             cmdbuf,
+            .@"undefined",
             .transfer_dst_optimal,
             .{},
             .{ .transfer_write_bit = true },
-            .{ .top_of_pipe_bit = true },
+            if (opts.mip_map) .{ .transfer_bit = true } else .{ .top_of_pipe_bit = true },
             .{ .transfer_bit = true },
             subresource_range,
         );
+        // Copy the first mip of the chain, remaining mips will be generated if needed
         texture.image.copyFromBuffer(gc, cmdbuf, stage_buffer, data.width, data.height);
-        texture.image.changeLayout(
-            gc,
-            cmdbuf,
-            .shader_read_only_optimal,
-            .{ .transfer_write_bit = true },
-            .{ .shader_read_bit = true },
-            .{ .transfer_bit = true },
-            .{ .fragment_shader_bit = true },
-            subresource_range,
-        );
+
+        if (mip_levels > 1) {
+            // pass total mip level to generate
+            subresource_range.level_count = mip_levels;
+            texture.image.generateMipMap(gc, cmdbuf, subresource_range);
+        } else {
+            texture.image.changeLayout(
+                gc,
+                cmdbuf,
+                .transfer_dst_optimal,
+                .shader_read_only_optimal,
+                .{ .transfer_read_bit = true },
+                .{ .shader_read_bit = true },
+                .{ .transfer_bit = true },
+                .{ .fragment_shader_bit = true },
+                subresource_range,
+            );
+        }
+
         try gc.endOneTimeCommandBuffer(cmdbuf);
 
         texture.view = try gc.create(vk.ImageViewCreateInfo{
@@ -107,7 +124,7 @@ pub const Texture2D = struct {
             .compare_enable = vk.FALSE,
             .compare_op = .always,
             .min_lod = 0,
-            .max_lod = 0,
+            .max_lod = if (opts.mip_map) @intToFloat(f32, mip_levels) else 0,
             .border_color = .int_opaque_black,
             .unnormalized_coordinates = vk.FALSE,
         }, filename);
@@ -157,6 +174,7 @@ pub const DepthStencilTexture = struct {
         texture.image.changeLayout(
             gc,
             cmdbuf,
+            .@"undefined",
             .depth_stencil_attachment_optimal,
             .{},
             .{ .depth_stencil_attachment_read_bit = true, .depth_stencil_attachment_write_bit = true },
@@ -182,3 +200,8 @@ pub const DepthStencilTexture = struct {
         gc.destroy(self.view);
     }
 };
+
+fn calcMipLevel(width: u32, height: u32) u32 {
+    const log2 = std.math.log2(std.math.max(width, height));
+    return @floatToInt(u32, std.math.floor(@intToFloat(f32, log2))) + 1;
+}

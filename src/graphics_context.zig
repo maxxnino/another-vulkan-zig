@@ -205,7 +205,6 @@ pub const GraphicsContext = struct {
     }
 
     pub fn endOneTimeCommandBuffer(self: GraphicsContext, cmdbuf: vk.CommandBuffer) !void {
-        defer self.vkd.freeCommandBuffers(self.dev, self.pool, 1, @ptrCast([*]const vk.CommandBuffer, &cmdbuf));
         try self.vkd.endCommandBuffer(cmdbuf);
 
         const si = vk.SubmitInfo{
@@ -217,8 +216,17 @@ pub const GraphicsContext = struct {
             .signal_semaphore_count = 0,
             .p_signal_semaphores = undefined,
         };
-        try self.vkd.queueSubmit(self.graphics_queue.handle, 1, @ptrCast([*]const vk.SubmitInfo, &si), .null_handle);
-        try self.vkd.queueWaitIdle(self.graphics_queue.handle);
+        // Create fence to ensure that the command buffer has finished executing
+        const fence = try self.create(vk.FenceCreateInfo{ .flags = .{} }, srcToString(@src()));
+        errdefer self.destroy(fence);
+        // Submit to the queue
+        try self.vkd.queueSubmit(self.graphics_queue.handle, 1, @ptrCast([*]const vk.SubmitInfo, &si), fence);
+
+        // Wait for the fence to signal that command buffer has finished executing
+        _ = try self.vkd.waitForFences(self.dev, 1, @ptrCast([*]const vk.Fence, &fence), vk.TRUE, std.math.maxInt(u64));
+
+        self.destroy(fence);
+        self.vkd.freeCommandBuffers(self.dev, self.pool, 1, @ptrCast([*]const vk.CommandBuffer, &cmdbuf));
     }
 
     pub fn printInstanceLayerAndExtension(self: GraphicsContext, allocator: Allocator) !void {
@@ -247,7 +255,7 @@ pub const GraphicsContext = struct {
 
     pub fn markCommandBuffer(self: GraphicsContext, command_buffer: vk.CommandBuffer, label: [*:0]const u8) void {
         if (enable_safety) {
-            self.vkd.cmdInsertDebugUtilsLabelEXT(command_buffer, .{
+            self.vkd.cmdInsertDebugUtilsLabelEXT(command_buffer, &.{
                 .p_label_name = label,
                 .color = [4]f32{ 0, 0, 0, 0 },
             });

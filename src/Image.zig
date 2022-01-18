@@ -25,6 +25,8 @@ image: vk.Image,
 allocation: vma.Allocation,
 layout: vk.ImageLayout,
 format: vk.Format,
+width: u32,
+height: u32,
 
 pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]const u8) !Image {
     const result = try gc.allocator.createImage(
@@ -53,8 +55,10 @@ pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]con
     var image: Image = undefined;
     image.image = result.image;
     image.allocation = result.allocation;
-    image.format = create_info.format;
     image.layout = .@"undefined";
+    image.format = create_info.format;
+    image.width = create_info.extent.width;
+    image.height = create_info.extent.height;
     return image;
 }
 
@@ -66,6 +70,7 @@ pub fn changeLayout(
     self: *Image,
     gc: GraphicsContext,
     cmdbuf: vk.CommandBuffer,
+    old_layout: vk.ImageLayout,
     new_layout: vk.ImageLayout,
     src_access_mask: vk.AccessFlags,
     dst_access_mask: vk.AccessFlags,
@@ -76,7 +81,7 @@ pub fn changeLayout(
     const barrier = vk.ImageMemoryBarrier{
         .src_access_mask = src_access_mask,
         .dst_access_mask = dst_access_mask,
-        .old_layout = self.layout,
+        .old_layout = old_layout,
         .new_layout = new_layout,
         .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
         .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -95,7 +100,6 @@ pub fn changeLayout(
         1,
         @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
     );
-
     self.layout = new_layout;
 }
 
@@ -130,40 +134,111 @@ pub fn copyFromBuffer(self: Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer
         @ptrCast([*]const vk.BufferImageCopy, &bic),
     );
 }
-// pub fn update(self: Buffer, comptime T: type, gc: GraphicsContext, in_data: []const T) !void {
-//     const gpu_mem = if (self.info.pMappedData) |data|
-//         @intToPtr([*]T, @ptrToInt(data))
-//     else
-//         try gc.allocator.mapMemory(self.allocation, T);
 
-//     for (in_data) |d, i| {
-//         gpu_mem[i] = d;
-//     }
-//     try self.flush(gc);
-// }
+pub fn generateMipMap(
+    self: *Image,
+    gc: GraphicsContext,
+    cmdbuf: vk.CommandBuffer,
+    subresource_range: vk.ImageSubresourceRange,
+) void {
+    std.debug.assert(self.layout == .transfer_dst_optimal);
+    var sr = subresource_range;
+    sr.level_count = 1;
+    sr.base_mip_level = 0;
 
-// fn flush(self: Buffer, gc: GraphicsContext) !void {
-//     try gc.allocator.flushAllocation(self.allocation, 0, self.info.size);
-//     if (self.info.pMappedData == null) {
-//         gc.allocator.unmapMemory(self.allocation);
-//     }
-// }
+    // Transition first mip level to transfer source for read during blit
+    self.changeLayout(
+        gc,
+        cmdbuf,
+        .transfer_dst_optimal,
+        .transfer_src_optimal,
+        .{ .transfer_write_bit = true },
+        .{ .transfer_read_bit = true },
+        .{ .transfer_bit = true },
+        .{ .transfer_bit = true },
+        sr,
+    );
 
-// pub fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
-//     // TODO: because smallest buffer size is 256 byte.
-//     // if data size is < 256, group multiple data to one buffer
-//     // std.log.info("src: info size: {}, data size: {}", .{src.info.size, src.size});
-//     // std.log.info("dst: info size: {}, data size: {}", .{dst.info.size, dst.size});
-//     const cmdbuf = try gc.beginOneTimeCommandBuffer();
-
-//     const region = vk.BufferCopy{
-//         .src_offset = 0,
-//         .dst_offset = 0,
-//         .size = src.size,
-//     };
-//     gc.vkd.cmdCopyBuffer(cmdbuf, src.buffer, dst.buffer, 1, @ptrCast([*]const vk.BufferCopy, &region));
-
-//     try gc.endOneTimeCommandBuffer(cmdbuf);
-// }
-
-// pub fn copyFromBuffer() void {}
+    // generate mip level
+    var i: u5 = 1;
+    while (i < subresource_range.level_count) : (i += 1) {
+        const ib = vk.ImageBlit{
+            .src_subresource = .{
+                .aspect_mask = sr.aspect_mask,
+                .mip_level = i - 1,
+                .base_array_layer = sr.base_array_layer,
+                .layer_count = 1,
+            },
+            .src_offsets = .{
+                .{ .x = 0, .y = 0, .z = 0 },
+                .{
+                    .x = @intCast(i32, self.width >> (i - 1)),
+                    .y = @intCast(i32, self.height >> (i - 1)),
+                    .z = 1,
+                },
+            },
+            .dst_subresource = .{
+                .aspect_mask = sr.aspect_mask,
+                .mip_level = i,
+                .base_array_layer = sr.base_array_layer,
+                .layer_count = 1,
+            },
+            .dst_offsets = .{
+                .{ .x = 0, .y = 0, .z = 0 },
+                .{
+                    .x = @intCast(i32, self.width >> i),
+                    .y = @intCast(i32, self.height >> i),
+                    .z = 1,
+                },
+            },
+        };
+        // Prepare current mip level as image blit destination
+        sr.base_mip_level = i;
+        self.changeLayout(
+            gc,
+            cmdbuf,
+            .@"undefined",
+            .transfer_dst_optimal,
+            .{},
+            .{ .transfer_write_bit = true },
+            .{ .transfer_bit = true },
+            .{ .transfer_bit = true },
+            sr,
+        );
+        // Blit from previous level
+        gc.vkd.cmdBlitImage(
+            cmdbuf,
+            self.image,
+            .transfer_src_optimal,
+            self.image,
+            .transfer_dst_optimal,
+            1,
+            @ptrCast([*]const vk.ImageBlit, &ib),
+            .linear,
+        );
+        // Prepare current mip level as image blit source for next level
+        self.changeLayout(
+            gc,
+            cmdbuf,
+            .transfer_dst_optimal,
+            .transfer_src_optimal,
+            .{ .transfer_write_bit = true },
+            .{ .transfer_read_bit = true },
+            .{ .transfer_bit = true },
+            .{ .transfer_bit = true },
+            sr,
+        );
+    }
+    // After the loop, all mip layers are in TRANSFER_SRC layout, so transition all to SHADER_READ
+    self.changeLayout(
+        gc,
+        cmdbuf,
+        .transfer_src_optimal,
+        .shader_read_only_optimal,
+        .{ .transfer_read_bit = true },
+        .{ .shader_read_bit = true },
+        .{ .transfer_bit = true },
+        .{ .fragment_shader_bit = true },
+        subresource_range,
+    );
+}

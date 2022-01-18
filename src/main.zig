@@ -168,7 +168,7 @@ pub fn main() !void {
     }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
 
-    const texture = try Texture2D.loadFromFile(gc, "assets/viking_room.png", .{ .anisotropy = true });
+    const texture = try Texture2D.loadFromFile(gc, "assets/viking_room.png", .{ .anisotropy = true, .mip_map = true });
     defer texture.deinit(gc);
 
     var camera = Camera{

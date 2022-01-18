@@ -95,6 +95,7 @@ const device_command = [_]vk.DeviceCommand{
     .beginCommandBuffer,
     .endCommandBuffer,
     .cmdDraw,
+    .cmdBlitImage,
     .cmdSetScissor,
     .cmdSetViewport,
     .cmdDrawIndexed,
