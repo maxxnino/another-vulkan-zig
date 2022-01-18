@@ -19,6 +19,7 @@ const assert = std.debug.assert;
 const Mat4 = z.Mat4;
 const Vec3 = z.Vec3;
 const Vec2 = z.Vec2;
+const Vec4 = z.Vec4;
 
 const app_name = "vulkan-zig triangle example";
 
@@ -46,19 +47,19 @@ const Vertex = struct {
             .binding = 0,
             .location = 1,
             .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "color"),
+            .offset = @offsetOf(Vertex, "normal"),
         },
         .{
             .binding = 0,
             .location = 2,
             .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "uv"),
+            .offset = @offsetOf(Vertex, "tex_coord"),
         },
     };
 
-    pos: [3]f32,
-    color: [3]f32,
-    uv: [2]f32,
+    pos: Vec3,
+    normal: Vec3,
+    tex_coord: Vec2,
 };
 
 const Mesh = struct {
@@ -67,22 +68,17 @@ const Mesh = struct {
     num_indices: u32,
     num_vertices: u32,
 };
-const vertices = [_]Vertex{
-    .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-    .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-    .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
-    .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
+// const vertices = [_]Vertex{
+//     .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+//     .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+//     .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
+//     .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
 
-    .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-    .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-    .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
-    .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
-};
-
-const indices_data = [_]u16{
-    4, 5, 6, 6, 7, 4,
-    0, 1, 2, 2, 3, 0,
-};
+//     .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+//     .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+//     .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
+//     .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
+// };
 
 pub fn main() !void {
     try glfw.init(.{});
@@ -112,6 +108,17 @@ pub fn main() !void {
         srcToString(@src()),
     );
     defer depth.deinit(gc);
+
+    // ********** load Model **********
+    var indices = std.ArrayList(u32).init(allocator);
+    defer indices.deinit();
+    var vertices = std.ArrayList(Vertex).init(allocator);
+    defer vertices.deinit();
+    var meshs = std.ArrayList(Mesh).init(allocator);
+    defer meshs.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    appendGltfModel(arena.allocator(), &meshs, &vertices, &indices, "assets/untitled.gltf");
+    //*********************************
 
     const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
         .binding = 0,
@@ -154,14 +161,14 @@ pub fn main() !void {
     const frame_size = @truncate(u32, framebuffers.len);
 
     const vertex_buffer = try Buffer.init(gc, Buffer.CreateInfo{
-        .size = @sizeOf(@TypeOf(vertices)),
+        .size = @sizeOf(Vertex) * vertices.items.len,
         .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
         .memory_usage = .gpu_only,
         .memory_flags = .{},
     }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
 
-    const texture = try Texture2D.loadFromFile(gc, "assets/texture.png", .{ .anisotropy = true });
+    const texture = try Texture2D.loadFromFile(gc, "assets/viking_room.png", .{ .anisotropy = true });
     defer texture.deinit(gc);
 
     var camera = Camera{
@@ -190,7 +197,7 @@ pub fn main() !void {
     };
 
     const index_buffer = try Buffer.init(gc, Buffer.CreateInfo{
-        .size = @sizeOf(@TypeOf(indices_data)),
+        .size = @sizeOf(u32) * indices.items.len,
         .buffer_usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
         .memory_usage = .gpu_only,
         .memory_flags = .{},
@@ -198,9 +205,9 @@ pub fn main() !void {
     defer index_buffer.deinit(gc);
 
     // uploadVertices
-    try uploadData(Vertex, gc, vertex_buffer, &vertices);
+    try uploadData(Vertex, gc, vertex_buffer, vertices.items);
     //Upload indices
-    try uploadData(u16, gc, index_buffer, &indices_data);
+    try uploadData(u32, gc, index_buffer, indices.items);
 
     // Desciptor Set
     const pool_sizes = [_]vk.DescriptorPoolSize{ .{
@@ -246,7 +253,7 @@ pub fn main() !void {
         swapchain.extent,
     );
     defer render_command.deinit(gc, allocator);
-    try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets);
+    try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets, meshs.items);
     //Timer
     var update_timer = try std.time.Timer.start();
 
@@ -285,7 +292,7 @@ pub fn main() !void {
                 pipeline_layout,
                 swapchain.extent,
             );
-            try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets);
+            try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets, meshs.items);
         }
 
         try glfw.pollEvents();
@@ -349,11 +356,12 @@ fn buildCommandBuffers(
     vertex_buffer: vk.Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
+    meshs: []const Mesh,
 ) !void {
     while (try render_command.begin(gc)) |cmdbuf| {
         const offset = [_]vk.DeviceSize{0};
         gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast([*]const vk.Buffer, &vertex_buffer), &offset);
-        gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint16);
+        gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
         gc.vkd.cmdBindDescriptorSets(
             cmdbuf,
             .graphics,
@@ -364,9 +372,9 @@ fn buildCommandBuffers(
             0,
             undefined,
         );
-        gc.vkd.cmdDrawIndexed(cmdbuf, @truncate(u32, indices_data.len), 1, 0, 0, 0);
-        // gc.vkd.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
-        // vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        for (meshs) |m| {
+            gc.vkd.cmdDrawIndexed(cmdbuf, m.num_indices, 1, m.index_offset, @intCast(i32, m.vertex_offset), 0);
+        }
         try render_command.end(gc);
     }
 }
@@ -613,12 +621,12 @@ pub fn appendGltfModel(
     all_meshes: *std.ArrayList(Mesh),
     all_vertices: *std.ArrayList(Vertex),
     all_indices: *std.ArrayList(u32),
-    path: []const u8,
+    path: [:0]const u8,
 ) void {
     var indices = std.ArrayList(u32).init(arena);
     var positions = std.ArrayList(Vec3).init(arena);
     var normals = std.ArrayList(Vec3).init(arena);
-    // var texcoords0 = std.ArrayList(Vec2).init(arena);
+    var texcoords0 = std.ArrayList(Vec2).init(arena);
     // var tangents = std.ArrayList(Vec4).init(arena);
 
     const data = parseAndLoadGltfFile(path);
@@ -637,7 +645,7 @@ pub fn appendGltfModel(
             const pre_indices_len = indices.items.len;
             const pre_positions_len = positions.items.len;
 
-            appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, null);
+            appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, &texcoords0, null);
 
             all_meshes.append(.{
                 .index_offset = @intCast(u32, pre_indices_len),
@@ -656,26 +664,25 @@ pub fn appendGltfModel(
     all_vertices.ensureTotalCapacity(positions.items.len) catch unreachable;
     for (positions.items) |_, index| {
         all_vertices.appendAssumeCapacity(.{
-            // .pos = positions.items[index].scale(0.08), // NOTE(mziulek): Sponza requires scaling.
-            .pos = positions.items[index],
+            .pos = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
+            // .pos = positions.items[index],
             .normal = normals.items[index],
-            // .tex_coord = texcoords0.items[index],
+            .tex_coord = texcoords0.items[index],
             // .tangent = tangents.items[index],
         });
     }
 }
 
-fn parseAndLoadGltfFile(gltf_path: []const u8) *cgltf.Data {
+fn parseAndLoadGltfFile(gltf_path: [:0]const u8) *cgltf.Data {
     var data: *cgltf.Data = undefined;
-    const options = std.mem.zeroes(cgltf.Option);
     // Parse.
     {
-        const result = cgltf.cgltf_parse_file(&options, gltf_path.ptr, &data);
+        const result = cgltf.cgltf_parse_file(&.{}, gltf_path.ptr, &data);
         assert(result == .success);
     }
     // Load.
     {
-        const result = cgltf.cgltf_load_buffers(&options, data, gltf_path.ptr);
+        const result = cgltf.cgltf_load_buffers(&.{}, data, gltf_path.ptr);
         assert(result == .success);
     }
     return data;
@@ -688,26 +695,25 @@ fn appendMeshPrimitive(
     positions: *std.ArrayList(Vec3),
     normals: ?*std.ArrayList(Vec3),
     texcoords0: ?*std.ArrayList(Vec2),
-    // tangents: ?*std.ArrayList(Vec4),
+    tangents: ?*std.ArrayList(Vec4),
 ) void {
     assert(mesh_index < data.meshes_count);
     assert(prim_index < data.meshes[mesh_index].primitives_count);
     const num_vertices: u32 = @intCast(u32, data.meshes[mesh_index].primitives[prim_index].attributes[0].data.count);
-    const num_indices: u32 = @intCast(u32, data.meshes[mesh_index].primitives[prim_index].indices.count);
+    const num_indices: u32 = @intCast(u32, data.meshes[mesh_index].primitives[prim_index].indices.?.count);
 
     // Indices.
     {
         indices.ensureTotalCapacity(indices.items.len + num_indices) catch unreachable;
 
-        const accessor = data.meshes[mesh_index].primitives[prim_index].indices;
+        const accessor = data.meshes[mesh_index].primitives[prim_index].indices.?;
 
-        assert(accessor.buffer_view != null);
-        assert(accessor.stride == accessor.buffer_view.stride or accessor.buffer_view.stride == 0);
-        assert((accessor.stride * accessor.count) == accessor.buffer_view.size);
-        assert(accessor.buffer_view.buffer.data != null);
+        const buffer_view = accessor.buffer_view.?;
+        assert(accessor.stride == buffer_view.stride or buffer_view.stride == 0);
+        assert((accessor.stride * accessor.count) == buffer_view.size);
 
-        const data_addr = @alignCast(4, @ptrCast([*]const u8, accessor.buffer_view.buffer.data) +
-            accessor.offset + accessor.buffer_view.offset);
+        const data_addr = @alignCast(4, @ptrCast([*]const u8, buffer_view.buffer.data.?) +
+            accessor.offset + buffer_view.offset);
 
         if (accessor.stride == 1) {
             assert(accessor.component_type == .r_8u);
@@ -740,7 +746,7 @@ fn appendMeshPrimitive(
         positions.resize(positions.items.len + num_vertices) catch unreachable;
         if (normals != null) normals.?.resize(normals.?.items.len + num_vertices) catch unreachable;
         if (texcoords0 != null) texcoords0.?.resize(texcoords0.?.items.len + num_vertices) catch unreachable;
-        // if (tangents != null) tangents.?.resize(tangents.?.items.len + num_vertices) catch unreachable;
+        if (tangents != null) tangents.?.resize(tangents.?.items.len + num_vertices) catch unreachable;
 
         const num_attribs: u32 = @truncate(u32, data.meshes[mesh_index].primitives[prim_index].attributes_count);
 
@@ -749,13 +755,12 @@ fn appendMeshPrimitive(
             const attrib = &data.meshes[mesh_index].primitives[prim_index].attributes[attrib_index];
             const accessor = attrib.data;
 
-            // assert(accessor.buffer_view != null);
-            assert(accessor.stride == accessor.buffer_view.stride or accessor.buffer_view.stride == 0);
-            assert((accessor.stride * accessor.count) == accessor.buffer_view.size);
-            assert(accessor.buffer_view.buffer.data != null);
+            const buffer_view = accessor.buffer_view.?;
+            assert(accessor.stride == buffer_view.stride or buffer_view.stride == 0);
+            assert((accessor.stride * accessor.count) == buffer_view.size);
 
-            const data_addr = @ptrCast([*]const u8, accessor.buffer_view.buffer.data) +
-                accessor.offset + accessor.buffer_view.offset;
+            const data_addr = @ptrCast([*]const u8, buffer_view.buffer.data.?) +
+                accessor.offset + buffer_view.offset;
 
             if (attrib.type == .position) {
                 assert(accessor.type == .vec3);

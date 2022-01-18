@@ -1,3 +1,4 @@
+const std = @import("std");
 pub const StbImage = StbImageType(u8);
 pub const StbImageU16 = StbImageType(u16);
 pub const StbImageF32 = StbImageType(f32);
@@ -22,6 +23,7 @@ pub fn StbImageType(comptime T: type) type {
             var y: i32 = 0;
             var c: i32 = 0;
             if (load_tuple[0](filename, &x, &y, &c, desired_channels)) |pixels| {
+                std.debug.assert(@enumToInt(desired_channels) == c);
                 const width = @intCast(u32, x);
                 const height = @intCast(u32, y);
                 const channels = @intCast(u32, c);
