@@ -77,12 +77,15 @@ pub fn deinit(rc: *RenderCommand, gc: GraphicsContext, allocator: Allocator) voi
 pub fn begin(rc: *RenderCommand, gc: GraphicsContext) !?vk.CommandBuffer {
     if (rc.index >= rc.framebuffers.len) return null;
     const cmdbuf = rc.command_buffers[rc.index];
-    const clear_value = [2]vk.ClearValue{
+    const clear_value = [3]vk.ClearValue{
         .{
             .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
         },
         .{
             .depth_stencil = .{ .depth = 1, .stencil = 0 },
+        },
+        .{
+            .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
         },
     };
     try gc.vkd.beginCommandBuffer(cmdbuf, &.{
@@ -97,7 +100,7 @@ pub fn begin(rc: *RenderCommand, gc: GraphicsContext) !?vk.CommandBuffer {
         .render_pass = rc.render_pass,
         .framebuffer = rc.framebuffers[rc.index],
         .render_area = rc.render_area,
-        .clear_value_count = 2,
+        .clear_value_count = @truncate(u32, clear_value.len),
         .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_value),
     }, .@"inline");
 

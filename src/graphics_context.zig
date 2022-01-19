@@ -23,6 +23,7 @@ const required_instance_extensions = [_][:0]const u8{
 
 const required_device_feature = vk.PhysicalDeviceFeatures{
     .sampler_anisotropy = vk.TRUE,
+    .sample_rate_shading = vk.TRUE,
 };
 
 pub const GraphicsContext = struct {
@@ -272,6 +273,11 @@ pub const GraphicsContext = struct {
                 });
             }
         }
+    }
+
+    pub fn getSampleCount(self: GraphicsContext) vk.SampleCountFlags {
+        _ = self;
+        return .{ .@"4_bit" = true };
     }
 };
 

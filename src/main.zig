@@ -101,13 +101,22 @@ pub fn main() !void {
     var swapchain = try Swapchain.init(&gc, allocator, extent);
     defer swapchain.deinit();
 
-    const depth = try tex.DepthStencilTexture.init(
+    var depth = try tex.DepthStencilTexture.init(
         gc,
         swapchain.extent.width,
         swapchain.extent.height,
         srcToString(@src()),
     );
     defer depth.deinit(gc);
+
+    var msaa = try tex.RenderTarget.init(
+        gc,
+        swapchain.extent.width,
+        swapchain.extent.height,
+        swapchain.surface_format.format,
+        srcToString(@src()),
+    );
+    defer msaa.deinit(gc);
 
     // ********** load Model **********
     var indices = std.ArrayList(u32).init(allocator);
@@ -156,7 +165,7 @@ pub fn main() !void {
     var pipeline = try createPipeline(&gc, pipeline_layout, render_pass);
     defer gc.destroy(pipeline);
 
-    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth);
+    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth, msaa);
     defer destroyFramebuffers(&gc, allocator, framebuffers);
     const frame_size = @truncate(u32, framebuffers.len);
 
@@ -172,9 +181,9 @@ pub fn main() !void {
     defer texture.deinit(gc);
 
     var camera = Camera{
-        .pitch = 0,
-        .yaw = 0,
-        .pos = Vec3.new(0, 0, -2.5),
+        .pitch = 30,
+        .yaw = 220,
+        .pos = Vec3.new(0, 2, 4),
     };
 
     var ubo_buffers = try allocator.alloc(Buffer, framebuffers.len);
@@ -279,8 +288,19 @@ pub fn main() !void {
             extent.height = @intCast(u32, size.height);
             try swapchain.recreate(extent);
 
+            // recreate depth resource
+            depth.deinit(gc);
+            depth = try tex.DepthStencilTexture.init(
+                gc,
+                swapchain.extent.width,
+                swapchain.extent.height,
+                srcToString(@src()),
+            );
+
+            //
+
             destroyFramebuffers(&gc, allocator, framebuffers);
-            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth);
+            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth, msaa);
 
             render_command.deinit(gc, allocator);
             render_command = try RenderCommand.init(
@@ -296,6 +316,7 @@ pub fn main() !void {
         }
 
         try glfw.pollEvents();
+        if (window.getKey(.q) == .press) break;
     }
 
     try swapchain.waitForAllFences();
@@ -385,6 +406,7 @@ fn createFramebuffers(
     render_pass: vk.RenderPass,
     swapchain: Swapchain,
     depth: tex.DepthStencilTexture,
+    msaa: tex.RenderTarget,
 ) ![]vk.Framebuffer {
     const framebuffers = try allocator.alloc(vk.Framebuffer, swapchain.swap_images.len);
     errdefer allocator.free(framebuffers);
@@ -396,10 +418,11 @@ fn createFramebuffers(
         fb.* = try gc.create(vk.FramebufferCreateInfo{
             .flags = .{},
             .render_pass = render_pass,
-            .attachment_count = 2,
+            .attachment_count = 3,
             .p_attachments = @ptrCast([*]const vk.ImageView, &[_]vk.ImageView{
-                swapchain.swap_images[i].view,
+                msaa.view,
                 depth.view,
+                swapchain.swap_images[i].view,
             }),
             .width = swapchain.extent.width,
             .height = swapchain.extent.height,
@@ -418,6 +441,35 @@ fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebu
 
 fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex.DepthStencilTexture) !vk.RenderPass {
     const attachments = [_]vk.AttachmentDescription{
+        // Msaa
+        .{
+            .flags = .{},
+            .format = swapchain.surface_format.format,
+            // Note: if sample count > 1, load_op should be clear or dont_care
+            // store_op should be dont_care for better performace
+            .samples = gc.getSampleCount(),
+            .load_op = .dont_care,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .@"undefined",
+            .final_layout = .color_attachment_optimal,
+        },
+        // depth
+        .{
+            .flags = .{},
+            .format = depth.image.format,
+            // Note: if sample count > 1, load_op should be clear or dont_care
+            // store_op should be dont_care for better performace
+            .samples = gc.getSampleCount(),
+            .load_op = .clear,
+            .store_op = .dont_care,
+            .stencil_load_op = .dont_care,
+            .stencil_store_op = .dont_care,
+            .initial_layout = .@"undefined",
+            .final_layout = depth.image.layout,
+        },
+        // resolve output
         .{
             .flags = .{},
             .format = swapchain.surface_format.format,
@@ -429,25 +481,21 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex
             .initial_layout = .@"undefined",
             .final_layout = .present_src_khr,
         },
-        .{
-            .flags = .{},
-            .format = depth.image.format,
-            .samples = .{ .@"1_bit" = true },
-            .load_op = .clear,
-            .store_op = .store,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .@"undefined",
-            .final_layout = depth.image.layout,
-        },
     };
+    //Msaa
     const color_attachment_ref = vk.AttachmentReference{
         .attachment = 0,
         .layout = .color_attachment_optimal,
     };
+    //Depth
     const depth_attachment_ref = vk.AttachmentReference{
         .attachment = 1,
         .layout = depth.image.layout,
+    };
+    //Resovle output
+    const resolve_attachment_ref = vk.AttachmentReference{
+        .attachment = 2,
+        .layout = .color_attachment_optimal,
     };
     const subpass = vk.SubpassDescription{
         .flags = .{},
@@ -456,12 +504,20 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex
         .p_input_attachments = undefined,
         .color_attachment_count = 1,
         .p_color_attachments = @ptrCast([*]const vk.AttachmentReference, &color_attachment_ref),
-        .p_resolve_attachments = null,
+        .p_resolve_attachments = @ptrCast([*]const vk.AttachmentReference, &resolve_attachment_ref),
         .p_depth_stencil_attachment = &depth_attachment_ref,
         .preserve_attachment_count = 0,
         .p_preserve_attachments = undefined,
     };
-
+    // const sd = vk.SubpassDependency{
+    //     .src_subpass = vk.SUBPASS_EXTERNAL,
+    //     .dst_subpass = 0,
+    //     .src_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+    //     .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+    //     .src_access_mask = .{},
+    //     .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
+    //     .dependency_flags = .{},
+    // };
     return try gc.create(vk.RenderPassCreateInfo{
         .flags = .{},
         .attachment_count = @truncate(u32, attachments.len),
@@ -470,6 +526,8 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex
         .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
         .dependency_count = 0,
         .p_dependencies = undefined,
+        // .dependency_count = 1,
+        // .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &sd),
     }, srcToString(@src()));
 }
 
@@ -547,9 +605,11 @@ fn createPipeline(
 
     const pmsci = vk.PipelineMultisampleStateCreateInfo{
         .flags = .{},
-        .rasterization_samples = .{ .@"1_bit" = true },
-        .sample_shading_enable = vk.FALSE,
-        .min_sample_shading = 1,
+        // enable msaa
+        .rasterization_samples = gc.getSampleCount(),
+        // enable sample shading
+        .sample_shading_enable = vk.TRUE,
+        .min_sample_shading = 0.2,
         .p_sample_mask = null,
         .alpha_to_coverage_enable = vk.FALSE,
         .alpha_to_one_enable = vk.FALSE,

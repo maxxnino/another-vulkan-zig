@@ -155,7 +155,7 @@ pub const DepthStencilTexture = struct {
             },
             .mip_levels = 1,
             .array_layers = 1,
-            .samples = .{ .@"1_bit" = true },
+            .samples = gc.getSampleCount(),
             .tiling = .optimal,
             .usage = .{
                 .depth_stencil_attachment_bit = true,
@@ -205,3 +205,94 @@ fn calcMipLevel(width: u32, height: u32) u32 {
     const log2 = std.math.log2(std.math.max(width, height));
     return @floatToInt(u32, std.math.floor(@intToFloat(f32, log2))) + 1;
 }
+
+pub const RenderTarget = struct {
+    image: Image,
+    view: vk.ImageView,
+
+    pub fn init(gc: GraphicsContext, width: u32, height: u32, format: vk.Format, label: ?[*:0]const u8) !RenderTarget {
+        var texture: RenderTarget = undefined;
+        texture.image = try Image.init(gc, .{
+            .flags = .{},
+            .image_type = .@"2d",
+            .format = format,
+            .extent = .{
+                .width = width,
+                .height = height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .samples = gc.getSampleCount(),
+            .tiling = .optimal,
+            .usage = .{
+                .transient_attachment_bit = true,
+                .color_attachment_bit = true,
+            },
+            .memory_usage = .gpu_only,
+            .memory_flags = .{},
+        }, label);
+
+        var subresource_range = vk.ImageSubresourceRange{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        };
+
+        //         const cmdbuf = try gc.beginOneTimeCommandBuffer();
+
+        //         // Optimal image will be used as destination for the copy, so we must transfer from
+        //         // our initial undefined image layout to the transfer destination layout
+        //         texture.image.changeLayout(
+        //             gc,
+        //             cmdbuf,
+        //             .@"undefined",
+        //             .transfer_dst_optimal,
+        //             .{},
+        //             .{ .transfer_write_bit = true },
+        //             if (opts.mip_map) .{ .transfer_bit = true } else .{ .top_of_pipe_bit = true },
+        //             .{ .transfer_bit = true },
+        //             subresource_range,
+        //         );
+        //         // Copy the first mip of the chain, remaining mips will be generated if needed
+        //         texture.image.copyFromBuffer(gc, cmdbuf, stage_buffer, data.width, data.height);
+
+        //         if (mip_levels > 1) {
+        //             // pass total mip level to generate
+        //             subresource_range.level_count = mip_levels;
+        //             texture.image.generateMipMap(gc, cmdbuf, subresource_range);
+        //         } else {
+        //             texture.image.changeLayout(
+        //                 gc,
+        //                 cmdbuf,
+        //                 .transfer_dst_optimal,
+        //                 .shader_read_only_optimal,
+        //                 .{ .transfer_read_bit = true },
+        //                 .{ .shader_read_bit = true },
+        //                 .{ .transfer_bit = true },
+        //                 .{ .fragment_shader_bit = true },
+        //                 subresource_range,
+        //             );
+        //         }
+
+        //         try gc.endOneTimeCommandBuffer(cmdbuf);
+
+        texture.view = try gc.create(vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = texture.image.image,
+            .view_type = .@"2d",
+            .format = texture.image.format,
+            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+            .subresource_range = subresource_range,
+        }, label);
+
+        return texture;
+    }
+
+    pub fn deinit(self: RenderTarget, gc: GraphicsContext) void {
+        self.image.deinit(gc);
+        gc.destroy(self.view);
+    }
+};
