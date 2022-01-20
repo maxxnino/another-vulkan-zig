@@ -2,7 +2,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 const Image = @import("Image.zig");
 const Buffer = @import("Buffer.zig");
-const StbImage = @import("stb_image.zig").StbImage;
+const StbImage = @import("binding/stb_image.zig").StbImage;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 
 pub const Texture2D = struct {

@@ -1,9 +1,8 @@
 const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
-const cgltf = @import("cgltf.zig");
+const cgltf = @import("binding/cgltf.zig");
 const resources = @import("resources");
-const vma = @import("vma.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Buffer = @import("Buffer.zig");
@@ -44,9 +43,11 @@ pub fn main() !void {
     try glfw.init(.{});
     defer glfw.terminate();
 
-    var extent = vk.Extent2D{ .width = 800, .height = 600 };
+    const monitor = glfw.Monitor.getPrimary().?;
+    const mode = try monitor.getVideoMode();
+    var extent = vk.Extent2D{ .width = mode.getWidth(), .height = mode.getHeight() };
 
-    const window = try glfw.Window.create(extent.width, extent.height, app_name, null, null, .{
+    const window = try glfw.Window.create(extent.width, extent.height, app_name, monitor, null, .{
         .client_api = .no_api,
     });
     defer window.destroy();

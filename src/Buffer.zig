@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const vk = @import("vulkan");
-const vma = @import("vma.zig");
+const vma = @import("binding/vma.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const srcToString = @import("util.zig").srcToString;
 

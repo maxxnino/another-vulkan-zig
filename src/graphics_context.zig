@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
-const vma = @import("vma.zig");
+const vma = @import("binding/vma.zig");
 const Buffer = @import("Buffer.zig");
 const VulkanDispatch = @import("VulkanDispatch.zig");
 const BaseDispatch = VulkanDispatch.BaseDispatch;
@@ -180,7 +180,10 @@ pub const GraphicsContext = struct {
         self.destroy(self.pool);
         self.vkd.destroyDevice(self.dev, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-        self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_message, null);
+        if (enable_safety) {
+            self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_message, null);
+        }
+
         self.vki.destroyInstance(self.instance, null);
     }
 

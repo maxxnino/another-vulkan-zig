@@ -16,6 +16,7 @@ pipeline_layout: vk.PipelineLayout,
 depth: ?tex.DepthStencilTexture,
 msaa: ?tex.RenderTarget,
 extent: vk.Extent2D,
+format: vk.Format,
 label: ?[*:0]const u8,
 
 const Self = @This();
@@ -62,6 +63,7 @@ pub fn init(gc: GraphicsContext, extent: vk.Extent2D, shader_binding: ShaderBind
     var renderer: Self = undefined;
     renderer.label = label;
     renderer.extent = extent;
+    renderer.format = format;
 
     renderer.render_pass = try createRenderPass(gc, format, opts, label);
     renderer.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
@@ -193,7 +195,7 @@ fn updateSize(self: *Self, gc: GraphicsContext, width: u32, height: u32) !void {
             gc,
             self.extent.width,
             self.extent.height,
-            .r8g8b8a8_unorm,
+            self.format,
             self.label,
         );
     }

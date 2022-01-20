@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
-const vma = @import("vma.zig");
+const vma = @import("binding/vma.zig");
 const MyBuffer = @import("Buffer.zig");
 pub const enable_safety = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
@@ -111,7 +111,7 @@ const device_command = [_]vk.DeviceCommand{
     .cmdCopyBufferToImage,
     .cmdBindVertexBuffers,
     .cmdBindDescriptorSets,
-} ++ device_vma ++ if (enable_safety) device_debug else [_]vk.InstanceCommand{};
+} ++ device_vma ++ if (enable_safety) device_debug else [_]vk.DeviceCommand{};
 pub const DeviceDispatch = vk.DeviceWrapper(&device_command);
 
 pub fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VulkanFunctions {
