@@ -73,9 +73,9 @@ pub const Texture2D = struct {
             .@"undefined",
             .transfer_dst_optimal,
             .{},
-            .{ .transfer_write_bit = true },
-            if (opts.mip_map) .{ .transfer_bit = true } else .{ .top_of_pipe_bit = true },
-            .{ .transfer_bit = true },
+            .{ .memory_write_bit_khr = true },
+            if (opts.mip_map) .{ .all_transfer_bit_khr = true } else .{},
+            .{ .all_transfer_bit_khr = true },
             subresource_range,
         );
         // Copy the first mip of the chain, remaining mips will be generated if needed
@@ -91,10 +91,10 @@ pub const Texture2D = struct {
                 cmdbuf,
                 .transfer_dst_optimal,
                 .shader_read_only_optimal,
-                .{ .transfer_read_bit = true },
-                .{ .shader_read_bit = true },
-                .{ .transfer_bit = true },
-                .{ .fragment_shader_bit = true },
+                .{ .transfer_write_bit_khr = true },
+                .{ .shader_sampled_read_bit_khr = true },
+                .{ .all_transfer_bit_khr = true },
+                .{ .fragment_shader_bit_khr = true },
                 subresource_range,
             );
         }
@@ -175,11 +175,11 @@ pub const DepthStencilTexture = struct {
             gc,
             cmdbuf,
             .@"undefined",
-            .depth_stencil_attachment_optimal,
+            .attachment_optimal_khr,
             .{},
-            .{ .depth_stencil_attachment_read_bit = true, .depth_stencil_attachment_write_bit = true },
-            .{ .top_of_pipe_bit = true },
-            .{ .early_fragment_tests_bit = true },
+            .{ .depth_stencil_attachment_read_bit_khr = true, .depth_stencil_attachment_write_bit_khr = true },
+            .{},
+            .{ .early_fragment_tests_bit_khr = true },
             subresource_range,
         );
         try gc.endOneTimeCommandBuffer(cmdbuf);
@@ -240,44 +240,6 @@ pub const RenderTarget = struct {
             .base_array_layer = 0,
             .layer_count = 1,
         };
-
-        //         const cmdbuf = try gc.beginOneTimeCommandBuffer();
-
-        //         // Optimal image will be used as destination for the copy, so we must transfer from
-        //         // our initial undefined image layout to the transfer destination layout
-        //         texture.image.changeLayout(
-        //             gc,
-        //             cmdbuf,
-        //             .@"undefined",
-        //             .transfer_dst_optimal,
-        //             .{},
-        //             .{ .transfer_write_bit = true },
-        //             if (opts.mip_map) .{ .transfer_bit = true } else .{ .top_of_pipe_bit = true },
-        //             .{ .transfer_bit = true },
-        //             subresource_range,
-        //         );
-        //         // Copy the first mip of the chain, remaining mips will be generated if needed
-        //         texture.image.copyFromBuffer(gc, cmdbuf, stage_buffer, data.width, data.height);
-
-        //         if (mip_levels > 1) {
-        //             // pass total mip level to generate
-        //             subresource_range.level_count = mip_levels;
-        //             texture.image.generateMipMap(gc, cmdbuf, subresource_range);
-        //         } else {
-        //             texture.image.changeLayout(
-        //                 gc,
-        //                 cmdbuf,
-        //                 .transfer_dst_optimal,
-        //                 .shader_read_only_optimal,
-        //                 .{ .transfer_read_bit = true },
-        //                 .{ .shader_read_bit = true },
-        //                 .{ .transfer_bit = true },
-        //                 .{ .fragment_shader_bit = true },
-        //                 subresource_range,
-        //             );
-        //         }
-
-        //         try gc.endOneTimeCommandBuffer(cmdbuf);
 
         texture.view = try gc.create(vk.ImageViewCreateInfo{
             .flags = .{},

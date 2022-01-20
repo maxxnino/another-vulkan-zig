@@ -336,16 +336,6 @@ pub fn uploadData(comptime T: type, gc: GraphicsContext, buffer: Buffer, data: [
 }
 
 fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer, texture: Texture2D) void {
-    const dbi = vk.DescriptorBufferInfo{
-        .buffer = buffer.buffer,
-        .offset = 0,
-        .range = buffer.size,
-    };
-    const dii = vk.DescriptorImageInfo{
-        .sampler = texture.smapler,
-        .image_view = texture.view,
-        .image_layout = texture.image.layout,
-    };
     const wds = [_]vk.WriteDescriptorSet{
         .{
             .dst_set = descriptor_set,
@@ -354,7 +344,11 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
             .descriptor_count = 1,
             .descriptor_type = .uniform_buffer,
             .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &dbi),
+            .p_buffer_info = &[_]vk.DescriptorBufferInfo{.{
+                .buffer = buffer.buffer,
+                .offset = 0,
+                .range = buffer.size,
+            }},
             .p_texel_buffer_view = undefined,
         },
         .{
@@ -363,7 +357,11 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .combined_image_sampler,
-            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &dii),
+            .p_image_info = &[_]vk.DescriptorImageInfo{.{
+                .sampler = texture.smapler,
+                .image_view = texture.view,
+                .image_layout = texture.image.layout,
+            }},
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         },
@@ -419,11 +417,11 @@ fn createFramebuffers(
             .flags = .{},
             .render_pass = render_pass,
             .attachment_count = 3,
-            .p_attachments = @ptrCast([*]const vk.ImageView, &[_]vk.ImageView{
+            .p_attachments = &[_]vk.ImageView{
                 msaa.view,
                 depth.view,
                 swapchain.swap_images[i].view,
-            }),
+            },
             .width = swapchain.extent.width,
             .height = swapchain.extent.height,
             .layers = 1,
@@ -482,30 +480,27 @@ fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex
             .final_layout = .present_src_khr,
         },
     };
-    //Msaa
-    const color_attachment_ref = vk.AttachmentReference{
-        .attachment = 0,
-        .layout = .color_attachment_optimal,
-    };
-    //Depth
-    const depth_attachment_ref = vk.AttachmentReference{
-        .attachment = 1,
-        .layout = depth.image.layout,
-    };
-    //Resovle output
-    const resolve_attachment_ref = vk.AttachmentReference{
-        .attachment = 2,
-        .layout = .color_attachment_optimal,
-    };
     const subpass = vk.SubpassDescription{
         .flags = .{},
         .pipeline_bind_point = .graphics,
         .input_attachment_count = 0,
         .p_input_attachments = undefined,
         .color_attachment_count = 1,
-        .p_color_attachments = @ptrCast([*]const vk.AttachmentReference, &color_attachment_ref),
-        .p_resolve_attachments = @ptrCast([*]const vk.AttachmentReference, &resolve_attachment_ref),
-        .p_depth_stencil_attachment = &depth_attachment_ref,
+        //Msaa
+        .p_color_attachments = &[_]vk.AttachmentReference{.{
+            .attachment = 0,
+            .layout = .color_attachment_optimal,
+        }},
+        //Resovle output
+        .p_resolve_attachments = &[_]vk.AttachmentReference{.{
+            .attachment = 2,
+            .layout = .color_attachment_optimal,
+        }},
+        //Depth
+        .p_depth_stencil_attachment = &.{
+            .attachment = 1,
+            .layout = depth.image.layout,
+        },
         .preserve_attachment_count = 0,
         .p_preserve_attachments = undefined,
     };

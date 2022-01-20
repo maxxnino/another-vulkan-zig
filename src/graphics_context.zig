@@ -214,36 +214,23 @@ pub const GraphicsContext = struct {
 
     pub fn endOneTimeCommandBuffer(self: GraphicsContext, cmdbuf: vk.CommandBuffer) !void {
         try self.vkd.endCommandBuffer(cmdbuf);
-
-        // const si = vk.SubmitInfo{
-        //     .wait_semaphore_count = 0,
-        //     .p_wait_semaphores = undefined,
-        //     .p_wait_dst_stage_mask = undefined,
-        //     .command_buffer_count = 1,
-        //     .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &cmdbuf),
-        //     .signal_semaphore_count = 0,
-        //     .p_signal_semaphores = undefined,
-        // };
-        const cbsi = vk.CommandBufferSubmitInfoKHR{
-            .command_buffer = cmdbuf,
-            .device_mask = 0,
-        };
-        const si2 = vk.SubmitInfo2KHR{
-            .flags = .{},
-            .wait_semaphore_info_count = 0,
-            .p_wait_semaphore_infos = undefined,
-            .command_buffer_info_count = 1,
-            .p_command_buffer_infos = @ptrCast([*]const vk.CommandBufferSubmitInfoKHR, &cbsi),
-            .signal_semaphore_info_count = 0,
-            .p_signal_semaphore_infos = undefined,
-        };
         // Create fence to ensure that the command buffer has finished executing
         const fence = try self.create(vk.FenceCreateInfo{ .flags = .{} }, srcToString(@src()));
         errdefer self.destroy(fence);
 
         // Submit to the queue
-        // try self.vkd.queueSubmit(self.graphics_queue.handle, 1, @ptrCast([*]const vk.SubmitInfo, &si), fence);
-        try self.vkd.queueSubmit2KHR(self.graphics_queue.handle, 1, @ptrCast([*]const vk.SubmitInfo2KHR, &si2), fence);
+        try self.vkd.queueSubmit2KHR(self.graphics_queue.handle, 1, &[_]vk.SubmitInfo2KHR{.{
+            .flags = .{},
+            .wait_semaphore_info_count = 0,
+            .p_wait_semaphore_infos = undefined,
+            .command_buffer_info_count = 1,
+            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfoKHR{.{
+                .command_buffer = cmdbuf,
+                .device_mask = 0,
+            }},
+            .signal_semaphore_info_count = 0,
+            .p_signal_semaphore_infos = undefined,
+        }}, fence);
 
         // Wait for the fence to signal that command buffer has finished executing
         _ = try self.vkd.waitForFences(self.dev, 1, @ptrCast([*]const vk.Fence, &fence), vk.TRUE, std.math.maxInt(u64));
@@ -355,7 +342,7 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate, alloca
         try device_exts.append(e);
     }
 
-    // enable khr_synchronization_2
+    // enable khr_synchronization_2 feature
     const khr_synchronization_2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
         .synchronization_2 = vk.TRUE,
     };

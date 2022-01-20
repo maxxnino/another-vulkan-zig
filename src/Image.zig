@@ -72,14 +72,16 @@ pub fn changeLayout(
     cmdbuf: vk.CommandBuffer,
     old_layout: vk.ImageLayout,
     new_layout: vk.ImageLayout,
-    src_access_mask: vk.AccessFlags,
-    dst_access_mask: vk.AccessFlags,
-    src_stage_mask: vk.PipelineStageFlags,
-    dst_stage_mask: vk.PipelineStageFlags,
+    src_access_mask: vk.AccessFlags2KHR,
+    dst_access_mask: vk.AccessFlags2KHR,
+    src_stage_mask: vk.PipelineStageFlags2KHR,
+    dst_stage_mask: vk.PipelineStageFlags2KHR,
     subresource_range: vk.ImageSubresourceRange,
 ) void {
-    const barrier = vk.ImageMemoryBarrier{
+    const barrier = vk.ImageMemoryBarrier2KHR{
+        .src_stage_mask = src_stage_mask,
         .src_access_mask = src_access_mask,
+        .dst_stage_mask = dst_stage_mask,
         .dst_access_mask = dst_access_mask,
         .old_layout = old_layout,
         .new_layout = new_layout,
@@ -88,18 +90,28 @@ pub fn changeLayout(
         .image = self.image,
         .subresource_range = subresource_range,
     };
-    gc.vkd.cmdPipelineBarrier(
-        cmdbuf,
-        src_stage_mask,
-        dst_stage_mask,
-        .{},
-        0,
-        undefined,
-        0,
-        undefined,
-        1,
-        @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
-    );
+    const di = vk.DependencyInfoKHR{
+        .dependency_flags = .{},
+        .memory_barrier_count = 0,
+        .p_memory_barriers = undefined,
+        .buffer_memory_barrier_count = 0,
+        .p_buffer_memory_barriers = undefined,
+        .image_memory_barrier_count = 1,
+        .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2KHR, &barrier),
+    };
+    gc.vkd.cmdPipelineBarrier2KHR(cmdbuf, &di);
+    // gc.vkd.cmdPipelineBarrier(
+    //     cmdbuf,
+    //     src_stage_mask,
+    //     dst_stage_mask,
+    //     .{},
+    //     0,
+    //     undefined,
+    //     0,
+    //     undefined,
+    //     1,
+    //     @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
+    // );
     self.layout = new_layout;
 }
 
@@ -152,10 +164,10 @@ pub fn generateMipMap(
         cmdbuf,
         .transfer_dst_optimal,
         .transfer_src_optimal,
-        .{ .transfer_write_bit = true },
-        .{ .transfer_read_bit = true },
-        .{ .transfer_bit = true },
-        .{ .transfer_bit = true },
+        .{ .transfer_write_bit_khr = true },
+        .{ .transfer_read_bit_khr = true },
+        .{ .all_transfer_bit_khr = true },
+        .{ .all_transfer_bit_khr  = true },
         sr,
     );
 
@@ -200,9 +212,9 @@ pub fn generateMipMap(
             .@"undefined",
             .transfer_dst_optimal,
             .{},
-            .{ .transfer_write_bit = true },
-            .{ .transfer_bit = true },
-            .{ .transfer_bit = true },
+            .{ .transfer_write_bit_khr = true },
+            .{ .all_transfer_bit_khr = true },
+            .{ .all_transfer_bit_khr = true },
             sr,
         );
         // Blit from previous level
@@ -222,10 +234,10 @@ pub fn generateMipMap(
             cmdbuf,
             .transfer_dst_optimal,
             .transfer_src_optimal,
-            .{ .transfer_write_bit = true },
-            .{ .transfer_read_bit = true },
-            .{ .transfer_bit = true },
-            .{ .transfer_bit = true },
+            .{ .transfer_write_bit_khr = true },
+            .{ .transfer_read_bit_khr = true },
+            .{ .all_transfer_bit_khr = true },
+            .{ .all_transfer_bit_khr = true },
             sr,
         );
     }
@@ -235,10 +247,10 @@ pub fn generateMipMap(
         cmdbuf,
         .transfer_src_optimal,
         .shader_read_only_optimal,
-        .{ .transfer_read_bit = true },
-        .{ .shader_read_bit = true },
-        .{ .transfer_bit = true },
-        .{ .fragment_shader_bit = true },
+        .{ .transfer_read_bit_khr = true },
+        .{ .shader_sampled_read_bit_khr = true },
+        .{ .all_transfer_bit_khr  = true },
+        .{ .fragment_shader_bit_khr = true },
         subresource_range,
     );
 }

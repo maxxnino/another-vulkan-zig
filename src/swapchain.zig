@@ -46,7 +46,7 @@ pub const Swapchain = struct {
             .concurrent
         else
             .exclusive;
-        const qfis = if(sharing_mode == .exclusive)
+        const qfis = if (sharing_mode == .exclusive)
             qfi[0..0]
         else
             qfi[0..1];
@@ -61,7 +61,7 @@ pub const Swapchain = struct {
             .image_array_layers = 1,
             .image_usage = .{ .color_attachment_bit = true, .transfer_dst_bit = true },
             .image_sharing_mode = sharing_mode,
-            .queue_family_index_count = @truncate(u32,qfis.len),
+            .queue_family_index_count = @truncate(u32, qfis.len),
             .p_queue_family_indices = qfis.ptr,
             .pre_transform = caps.current_transform,
             .composite_alpha = .{ .opaque_bit_khr = true },
@@ -155,15 +155,28 @@ pub const Swapchain = struct {
         try self.gc.vkd.resetFences(self.gc.dev, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
 
         // Step 2: Submit the command buffer
-        const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
-        try self.gc.vkd.queueSubmit(self.gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &current.image_acquired),
-            .p_wait_dst_stage_mask = &wait_stage,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &cmdbuf),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &current.render_finished),
+
+        try self.gc.vkd.queueSubmit2KHR(self.gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo2KHR{.{
+            .flags = .{},
+            .wait_semaphore_info_count = 1,
+            .p_wait_semaphore_infos = &[_]vk.SemaphoreSubmitInfoKHR{.{
+                .semaphore = current.image_acquired,
+                .value = 1,
+                .stage_mask = .{},
+                .device_index = 0,
+            }},
+            .command_buffer_info_count = 1,
+            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfoKHR{.{
+                .command_buffer = cmdbuf,
+                .device_mask = 0,
+            }},
+            .signal_semaphore_info_count = 1,
+            .p_signal_semaphore_infos = &[_]vk.SemaphoreSubmitInfoKHR{.{
+                .semaphore = current.render_finished,
+                .value = 1,
+                .stage_mask = .{},
+                .device_index = 0,
+            }},
         }}, current.frame_fence);
 
         // Step 3: Present the current frame
