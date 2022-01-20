@@ -5,22 +5,29 @@ const Buffer = @import("Buffer.zig");
 const StbImage = @import("binding/stb_image.zig").StbImage;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 
-pub const Texture2D = struct {
-    pub const Option = struct {
+pub const TextureType = enum {
+    cube_map,
+    texture,
+};
+
+pub const Texture = struct {
+    pub const Config = struct {
         /// true mean enable anisotropy
         anisotropy: bool = false,
 
         /// true mean enable mip map
         mip_map: bool = false,
+
+        @"type": TextureType,
     };
     image: Image,
     view: vk.ImageView,
     smapler: vk.Sampler,
-    opts: Option,
+    config: Config,
 
-    pub fn loadFromFile(gc: GraphicsContext, filename: [*:0]const u8, opts: Option) !Texture2D {
-        var texture: Texture2D = undefined;
-        texture.opts = opts;
+    pub fn loadFromFile(gc: GraphicsContext, filename: [*:0]const u8, comptime config: Config) !Texture {
+        var texture: Texture = undefined;
+        texture.config = config;
         const data = try StbImage.loadFromFile(filename, .rgb_alpha);
         defer data.free();
 
@@ -32,18 +39,23 @@ pub const Texture2D = struct {
         }, filename);
         defer stage_buffer.deinit(gc);
         try stage_buffer.update(u8, gc, data.pixels);
-        const mip_levels = if (opts.mip_map) calcMipLevel(data.width, data.height) else 1;
+        const width = switch (config.@"type") {
+            .texture => data.width,
+            .cube_map => data.width / 6,
+        };
+
+        const mip_levels = if (config.mip_map) calcMipLevel(width, data.height) else 1;
         texture.image = try Image.init(gc, .{
-            .flags = .{},
+            .flags = if (config.@"type" == .cube_map) .{ .cube_compatible_bit = true } else .{},
             .image_type = .@"2d",
             .format = .r8g8b8a8_srgb,
             .extent = .{
-                .width = data.width,
+                .width = width,
                 .height = data.height,
                 .depth = 1,
             },
             .mip_levels = mip_levels,
-            .array_layers = 1,
+            .array_layers = if (config.@"type" == .cube_map) 6 else 1,
             .samples = .{ .@"1_bit" = true },
             .tiling = .optimal,
             .usage = .{
@@ -72,9 +84,7 @@ pub const Texture2D = struct {
             cmdbuf,
             .@"undefined",
             .transfer_dst_optimal,
-            .{},
-            .{ .memory_write_bit_khr = true },
-            if (opts.mip_map) .{ .all_transfer_bit_khr = true } else .{},
+            if (config.mip_map) .{ .all_transfer_bit_khr = true } else .{},
             .{ .all_transfer_bit_khr = true },
             subresource_range,
         );
@@ -91,8 +101,6 @@ pub const Texture2D = struct {
                 cmdbuf,
                 .transfer_dst_optimal,
                 .shader_read_only_optimal,
-                .{ .transfer_write_bit_khr = true },
-                .{ .shader_sampled_read_bit_khr = true },
                 .{ .all_transfer_bit_khr = true },
                 .{ .fragment_shader_bit_khr = true },
                 subresource_range,
@@ -119,19 +127,19 @@ pub const Texture2D = struct {
             .address_mode_v = .repeat,
             .address_mode_w = .repeat,
             .mip_lod_bias = 0,
-            .anisotropy_enable = if (opts.anisotropy == true) vk.TRUE else vk.FALSE,
-            .max_anisotropy = if (opts.anisotropy == true) gc.props.limits.max_sampler_anisotropy else undefined,
+            .anisotropy_enable = if (config.anisotropy == true) vk.TRUE else vk.FALSE,
+            .max_anisotropy = if (config.anisotropy == true) gc.props.limits.max_sampler_anisotropy else undefined,
             .compare_enable = vk.FALSE,
             .compare_op = .always,
             .min_lod = 0,
-            .max_lod = if (opts.mip_map) @intToFloat(f32, mip_levels) else 0,
+            .max_lod = if (config.mip_map) @intToFloat(f32, mip_levels) else 0,
             .border_color = .int_opaque_black,
             .unnormalized_coordinates = vk.FALSE,
         }, filename);
         return texture;
     }
 
-    pub fn deinit(self: Texture2D, gc: GraphicsContext) void {
+    pub fn deinit(self: Texture, gc: GraphicsContext) void {
         self.image.deinit(gc);
         gc.destroy(self.view);
         gc.destroy(self.smapler);
@@ -175,9 +183,7 @@ pub const DepthStencilTexture = struct {
             gc,
             cmdbuf,
             .@"undefined",
-            .attachment_optimal_khr,
-            .{},
-            .{ .depth_stencil_attachment_read_bit_khr = true, .depth_stencil_attachment_write_bit_khr = true },
+            .depth_attachment_optimal,
             .{},
             .{ .early_fragment_tests_bit_khr = true },
             subresource_range,

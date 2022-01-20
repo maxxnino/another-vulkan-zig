@@ -9,7 +9,7 @@ const Buffer = @import("Buffer.zig");
 const Allocator = std.mem.Allocator;
 const Camera = @import("Camera.zig");
 const tex = @import("texture.zig");
-const Texture2D = tex.Texture2D;
+const Texture = tex.Texture;
 const Shader = @import("Shader.zig");
 const ShaderBinding = @import("ShaderBinding.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
@@ -131,7 +131,11 @@ pub fn main() !void {
     }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
 
-    const texture = try Texture2D.loadFromFile(gc, "assets/viking_room.png", .{ .anisotropy = true, .mip_map = true });
+    const texture = try Texture.loadFromFile(
+        gc,
+        "assets/viking_room.png",
+        .{ .@"type" = .texture, .anisotropy = true, .mip_map = true },
+    );
     defer texture.deinit(gc);
 
     var camera = Camera{
@@ -295,7 +299,7 @@ pub fn uploadData(comptime T: type, gc: GraphicsContext, buffer: Buffer, data: [
     try stage_buffer.copyToBuffer(buffer, gc);
 }
 
-fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer, texture: Texture2D) void {
+fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer, texture: Texture) void {
     const wds = [_]vk.WriteDescriptorSet{
         .{
             .dst_set = descriptor_set,
