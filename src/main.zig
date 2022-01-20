@@ -8,10 +8,12 @@ const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Buffer = @import("Buffer.zig");
 const Allocator = std.mem.Allocator;
-const RenderCommand = @import("RenderCommand.zig");
 const Camera = @import("Camera.zig");
 const tex = @import("texture.zig");
 const Texture2D = tex.Texture2D;
+const Shader = @import("Shader.zig");
+const ShaderBinding = @import("ShaderBinding.zig");
+const BasicRenderer = @import("BasicRenderer.zig");
 const srcToString = @import("util.zig").srcToString;
 
 const z = @import("zalgebra");
@@ -29,56 +31,14 @@ const UniformBufferObject = struct {
     proj: Mat4,
 };
 
-const Vertex = struct {
-    const binding_description = vk.VertexInputBindingDescription{
-        .binding = 0,
-        .stride = @sizeOf(Vertex),
-        .input_rate = .vertex,
-    };
-
-    const attribute_description = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = 0,
-            .location = 0,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        },
-        .{
-            .binding = 0,
-            .location = 1,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "normal"),
-        },
-        .{
-            .binding = 0,
-            .location = 2,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "tex_coord"),
-        },
-    };
-
-    pos: Vec3,
-    normal: Vec3,
-    tex_coord: Vec2,
-};
-
+const Vertex = BasicRenderer.Vertex;
 const Mesh = struct {
     index_offset: u32,
     vertex_offset: u32,
     num_indices: u32,
     num_vertices: u32,
 };
-// const vertices = [_]Vertex{
-//     .{ .pos = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-//     .{ .pos = .{ 0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-//     .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
-//     .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
-
-//     .{ .pos = .{ -0.5, -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-//     .{ .pos = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-//     .{ .pos = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } },
-//     .{ .pos = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
-// };
+const Gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = false });
 
 pub fn main() !void {
     try glfw.init(.{});
@@ -90,33 +50,8 @@ pub fn main() !void {
         .client_api = .no_api,
     });
     defer window.destroy();
-
-    const allocator = std.heap.page_allocator;
-
-    const gc = try GraphicsContext.init(allocator, app_name, window);
-    defer gc.deinit();
-
-    std.debug.print("Using device: {s}\n", .{gc.deviceName()});
-
-    var swapchain = try Swapchain.init(&gc, allocator, extent);
-    defer swapchain.deinit();
-
-    var depth = try tex.DepthStencilTexture.init(
-        gc,
-        swapchain.extent.width,
-        swapchain.extent.height,
-        srcToString(@src()),
-    );
-    defer depth.deinit(gc);
-
-    var msaa = try tex.RenderTarget.init(
-        gc,
-        swapchain.extent.width,
-        swapchain.extent.height,
-        swapchain.surface_format.format,
-        srcToString(@src()),
-    );
-    defer msaa.deinit(gc);
+    var gpa = Gpa{};
+    const allocator = gpa.allocator();
 
     // ********** load Model **********
     var indices = std.ArrayList(u32).init(allocator);
@@ -129,44 +64,62 @@ pub fn main() !void {
     appendGltfModel(arena.allocator(), &meshs, &vertices, &indices, "assets/untitled.gltf");
     //*********************************
 
-    const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
-        .binding = 0,
-        .descriptor_type = .uniform_buffer,
-        .descriptor_count = 1,
-        .stage_flags = .{ .vertex_bit = true },
-        .p_immutable_samplers = null,
-    }, .{
-        .binding = 1,
-        .descriptor_type = .combined_image_sampler,
-        .descriptor_count = 1,
-        .stage_flags = .{ .fragment_bit = true },
-        .p_immutable_samplers = null,
-    } };
+    const gc = try GraphicsContext.init(allocator, app_name, window);
+    defer gc.deinit();
 
-    const descriptor_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
-        .flags = .{},
-        .binding_count = @truncate(u32, bindings.len),
-        .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &bindings),
-    }, srcToString(@src()));
-    defer gc.destroy(descriptor_set_layout);
+    std.debug.print("Using device: {s}\n", .{gc.deviceName()});
 
-    const pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
-        .flags = .{},
-        .set_layout_count = 1,
-        .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = undefined,
-    }, srcToString(@src()));
-    defer gc.destroy(pipeline_layout);
+    var swapchain = try Swapchain.init(&gc, allocator, extent);
+    defer swapchain.deinit();
 
-    const render_pass = try createRenderPass(&gc, swapchain, depth);
-    defer gc.destroy(render_pass);
+    // ********** BasicRenderer **********
+    const vert_shader = try Shader.createFromMemory(
+        gc,
+        allocator,
+        resources.triangle_vert,
+        "main",
+        .{ .vertex_bit = true },
+        &[_]Shader.BindingInfo{.{
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
+        }},
+        srcToString(@src()),
+    );
+    defer vert_shader.deinit(gc);
 
-    var pipeline = try createPipeline(&gc, pipeline_layout, render_pass);
-    defer gc.destroy(pipeline);
+    const frag_shader = try Shader.createFromMemory(
+        gc,
+        allocator,
+        resources.triangle_frag,
+        "main",
+        .{ .fragment_bit = true },
+        &[_]Shader.BindingInfo{.{
+            .binding = 1,
+            .descriptor_type = .combined_image_sampler,
+        }},
+        srcToString(@src()),
+    );
+    defer frag_shader.deinit(gc);
 
-    var framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth, msaa);
+    var shader_binding = ShaderBinding.init(allocator);
+    defer shader_binding.deinit();
+    try shader_binding.addShader(vert_shader);
+    try shader_binding.addShader(frag_shader);
+
+    var renderer = try BasicRenderer.init(
+        gc,
+        swapchain.extent,
+        shader_binding,
+        swapchain.surface_format.format,
+        .{},
+        srcToString(@src()),
+    );
+    defer renderer.deinit(gc);
+
+    var framebuffers = try createFramebuffers(gc, allocator, swapchain, &renderer, srcToString(@src()));
     defer destroyFramebuffers(&gc, allocator, framebuffers);
+    //*********************************
+
     const frame_size = @truncate(u32, framebuffers.len);
 
     const vertex_buffer = try Buffer.init(gc, Buffer.CreateInfo{
@@ -235,10 +188,9 @@ pub fn main() !void {
     defer gc.destroy(descriptor_pool);
     var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
     for (des_layouts) |*l| {
-        l.* = descriptor_set_layout;
+        l.* = renderer.descriptor_set_layout;
     }
     defer allocator.free(des_layouts);
-
     const dsai = vk.DescriptorSetAllocateInfo{
         .descriptor_pool = descriptor_pool,
         .descriptor_set_count = frame_size,
@@ -252,17 +204,29 @@ pub fn main() !void {
     }
     //End descriptor set
 
-    var render_command = try RenderCommand.init(
-        allocator,
+    //******** Command Buffer **********
+    var command_buffers = try allocator.alloc(vk.CommandBuffer, framebuffers.len);
+    defer allocator.free(command_buffers);
+
+    try gc.vkd.allocateCommandBuffers(gc.dev, &.{
+        .command_pool = gc.pool,
+        .level = .primary,
+        .command_buffer_count = @truncate(u32, command_buffers.len),
+    }, command_buffers.ptr);
+    defer gc.vkd.freeCommandBuffers(gc.dev, gc.pool, @truncate(u32, command_buffers.len), command_buffers.ptr);
+
+    try buildCommandBuffers(
         gc,
+        renderer,
         framebuffers,
-        render_pass,
-        pipeline,
-        pipeline_layout,
-        swapchain.extent,
+        command_buffers,
+        vertex_buffer.buffer,
+        index_buffer.buffer,
+        des_sets,
+        meshs.items,
     );
-    defer render_command.deinit(gc, allocator);
-    try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets, meshs.items);
+
+    //*********************************
     //Timer
     var update_timer = try std.time.Timer.start();
 
@@ -275,7 +239,7 @@ pub fn main() !void {
             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
         }});
 
-        const cmdbuf = render_command.command_buffers[swapchain.image_index];
+        const cmdbuf = command_buffers[swapchain.image_index];
 
         const state = swapchain.present(cmdbuf) catch |err| switch (err) {
             error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
@@ -288,31 +252,26 @@ pub fn main() !void {
             extent.height = @intCast(u32, size.height);
             try swapchain.recreate(extent);
 
-            // recreate depth resource
-            depth.deinit(gc);
-            depth = try tex.DepthStencilTexture.init(
-                gc,
-                swapchain.extent.width,
-                swapchain.extent.height,
-                srcToString(@src()),
-            );
-
-            //
-
             destroyFramebuffers(&gc, allocator, framebuffers);
-            framebuffers = try createFramebuffers(&gc, allocator, render_pass, swapchain, depth, msaa);
+            framebuffers = try createFramebuffers(gc, allocator, swapchain, &renderer, srcToString(@src()));
 
-            render_command.deinit(gc, allocator);
-            render_command = try RenderCommand.init(
-                allocator,
+            gc.vkd.freeCommandBuffers(gc.dev, gc.pool, @truncate(u32, command_buffers.len), command_buffers.ptr);
+            try gc.vkd.allocateCommandBuffers(gc.dev, &.{
+                .command_pool = gc.pool,
+                .level = .primary,
+                .command_buffer_count = @truncate(u32, command_buffers.len),
+            }, command_buffers.ptr);
+
+            try buildCommandBuffers(
                 gc,
+                renderer,
                 framebuffers,
-                render_pass,
-                pipeline,
-                pipeline_layout,
-                swapchain.extent,
+                command_buffers,
+                vertex_buffer.buffer,
+                index_buffer.buffer,
+                des_sets,
+                meshs.items,
             );
-            try buildCommandBuffers(&render_command, gc, vertex_buffer.buffer, index_buffer.buffer, des_sets, meshs.items);
         }
 
         try glfw.pollEvents();
@@ -370,41 +329,45 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
 }
 
 fn buildCommandBuffers(
-    render_command: *RenderCommand,
     gc: GraphicsContext,
+    renderer: BasicRenderer,
+    framebuffers: []const vk.Framebuffer,
+    cmdbufs: []const vk.CommandBuffer,
     vertex_buffer: vk.Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     meshs: []const Mesh,
 ) !void {
-    while (try render_command.begin(gc)) |cmdbuf| {
+    for (framebuffers) |*framebuffer, i| {
+        const cmdbuf = cmdbufs[i];
+        try renderer.beginFrame(gc, framebuffer.*, cmdbuf);
+
         const offset = [_]vk.DeviceSize{0};
         gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast([*]const vk.Buffer, &vertex_buffer), &offset);
         gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
         gc.vkd.cmdBindDescriptorSets(
             cmdbuf,
             .graphics,
-            render_command.pipeline_layout,
+            renderer.pipeline_layout,
             0,
             1,
-            @ptrCast([*]const vk.DescriptorSet, &sets[render_command.index - 1]),
+            @ptrCast([*]const vk.DescriptorSet, &sets[i]),
             0,
             undefined,
         );
         for (meshs) |m| {
             gc.vkd.cmdDrawIndexed(cmdbuf, m.num_indices, 1, m.index_offset, @intCast(i32, m.vertex_offset), 0);
         }
-        try render_command.end(gc);
+        try renderer.endFrame(gc, cmdbuf);
     }
 }
 
 fn createFramebuffers(
-    gc: *const GraphicsContext,
+    gc: GraphicsContext,
     allocator: Allocator,
-    render_pass: vk.RenderPass,
     swapchain: Swapchain,
-    depth: tex.DepthStencilTexture,
-    msaa: tex.RenderTarget,
+    renderer: *BasicRenderer,
+    label: ?[*:0]const u8,
 ) ![]vk.Framebuffer {
     const framebuffers = try allocator.alloc(vk.Framebuffer, swapchain.swap_images.len);
     errdefer allocator.free(framebuffers);
@@ -412,20 +375,8 @@ fn createFramebuffers(
     var i: usize = 0;
     errdefer for (framebuffers[0..i]) |fb| gc.vkd.destroyFramebuffer(gc.dev, fb, null);
 
-    for (framebuffers) |*fb| {
-        fb.* = try gc.create(vk.FramebufferCreateInfo{
-            .flags = .{},
-            .render_pass = render_pass,
-            .attachment_count = 3,
-            .p_attachments = &[_]vk.ImageView{
-                msaa.view,
-                depth.view,
-                swapchain.swap_images[i].view,
-            },
-            .width = swapchain.extent.width,
-            .height = swapchain.extent.height,
-            .layers = 1,
-        }, srcToString(@src()));
+    for (framebuffers) |*fb, j| {
+        fb.* = try renderer.createFrameBuffer(gc, swapchain.extent, swapchain.swap_images[j].view, label);
         i += 1;
     }
 
@@ -437,240 +388,6 @@ fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebu
     allocator.free(framebuffers);
 }
 
-fn createRenderPass(gc: *const GraphicsContext, swapchain: Swapchain, depth: tex.DepthStencilTexture) !vk.RenderPass {
-    const attachments = [_]vk.AttachmentDescription{
-        // Msaa
-        .{
-            .flags = .{},
-            .format = swapchain.surface_format.format,
-            // Note: if sample count > 1, load_op should be clear or dont_care
-            // store_op should be dont_care for better performace
-            .samples = gc.getSampleCount(),
-            .load_op = .dont_care,
-            .store_op = .dont_care,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .@"undefined",
-            .final_layout = .color_attachment_optimal,
-        },
-        // depth
-        .{
-            .flags = .{},
-            .format = depth.image.format,
-            // Note: if sample count > 1, load_op should be clear or dont_care
-            // store_op should be dont_care for better performace
-            .samples = gc.getSampleCount(),
-            .load_op = .clear,
-            .store_op = .dont_care,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .@"undefined",
-            .final_layout = depth.image.layout,
-        },
-        // resolve output
-        .{
-            .flags = .{},
-            .format = swapchain.surface_format.format,
-            .samples = .{ .@"1_bit" = true },
-            .load_op = .clear,
-            .store_op = .store,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .@"undefined",
-            .final_layout = .present_src_khr,
-        },
-    };
-    const subpass = vk.SubpassDescription{
-        .flags = .{},
-        .pipeline_bind_point = .graphics,
-        .input_attachment_count = 0,
-        .p_input_attachments = undefined,
-        .color_attachment_count = 1,
-        //Msaa
-        .p_color_attachments = &[_]vk.AttachmentReference{.{
-            .attachment = 0,
-            .layout = .color_attachment_optimal,
-        }},
-        //Resovle output
-        .p_resolve_attachments = &[_]vk.AttachmentReference{.{
-            .attachment = 2,
-            .layout = .color_attachment_optimal,
-        }},
-        //Depth
-        .p_depth_stencil_attachment = &.{
-            .attachment = 1,
-            .layout = depth.image.layout,
-        },
-        .preserve_attachment_count = 0,
-        .p_preserve_attachments = undefined,
-    };
-    // const sd = vk.SubpassDependency{
-    //     .src_subpass = vk.SUBPASS_EXTERNAL,
-    //     .dst_subpass = 0,
-    //     .src_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
-    //     .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
-    //     .src_access_mask = .{},
-    //     .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
-    //     .dependency_flags = .{},
-    // };
-    return try gc.create(vk.RenderPassCreateInfo{
-        .flags = .{},
-        .attachment_count = @truncate(u32, attachments.len),
-        .p_attachments = @ptrCast([*]const vk.AttachmentDescription, &attachments),
-        .subpass_count = 1,
-        .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
-        .dependency_count = 0,
-        .p_dependencies = undefined,
-        // .dependency_count = 1,
-        // .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &sd),
-    }, srcToString(@src()));
-}
-
-fn createPipeline(
-    gc: *const GraphicsContext,
-    layout: vk.PipelineLayout,
-    render_pass: vk.RenderPass,
-) !vk.Pipeline {
-    const vert = try gc.create(vk.ShaderModuleCreateInfo{
-        .flags = .{},
-        .code_size = resources.triangle_vert.len,
-        .p_code = @ptrCast([*]const u32, resources.triangle_vert),
-    }, srcToString(@src()));
-    defer gc.destroy(vert);
-
-    const frag = try gc.create(vk.ShaderModuleCreateInfo{
-        .flags = .{},
-        .code_size = resources.triangle_frag.len,
-        .p_code = @ptrCast([*]const u32, resources.triangle_frag),
-    }, srcToString(@src()));
-    defer gc.destroy(frag);
-
-    const pssci = [_]vk.PipelineShaderStageCreateInfo{
-        .{
-            .flags = .{},
-            .stage = .{ .vertex_bit = true },
-            .module = vert,
-            .p_name = "main",
-            .p_specialization_info = null,
-        },
-        .{
-            .flags = .{},
-            .stage = .{ .fragment_bit = true },
-            .module = frag,
-            .p_name = "main",
-            .p_specialization_info = null,
-        },
-    };
-
-    const pvisci = vk.PipelineVertexInputStateCreateInfo{
-        .flags = .{},
-        .vertex_binding_description_count = 1,
-        .p_vertex_binding_descriptions = @ptrCast([*]const vk.VertexInputBindingDescription, &Vertex.binding_description),
-        .vertex_attribute_description_count = Vertex.attribute_description.len,
-        .p_vertex_attribute_descriptions = &Vertex.attribute_description,
-    };
-
-    const piasci = vk.PipelineInputAssemblyStateCreateInfo{
-        .flags = .{},
-        .topology = .triangle_list,
-        .primitive_restart_enable = vk.FALSE,
-    };
-
-    const pvsci = vk.PipelineViewportStateCreateInfo{
-        .flags = .{},
-        .viewport_count = 1,
-        .p_viewports = undefined, // set in createCommandBuffers with cmdSetViewport
-        .scissor_count = 1,
-        .p_scissors = undefined, // set in createCommandBuffers with cmdSetScissor
-    };
-
-    const prsci = vk.PipelineRasterizationStateCreateInfo{
-        .flags = .{},
-        .depth_clamp_enable = vk.FALSE,
-        .rasterizer_discard_enable = vk.FALSE,
-        .polygon_mode = .fill,
-        .cull_mode = .{ .back_bit = true },
-        .front_face = .counter_clockwise,
-        .depth_bias_enable = vk.FALSE,
-        .depth_bias_constant_factor = 0,
-        .depth_bias_clamp = 0,
-        .depth_bias_slope_factor = 0,
-        .line_width = 1,
-    };
-
-    const pmsci = vk.PipelineMultisampleStateCreateInfo{
-        .flags = .{},
-        // enable msaa
-        .rasterization_samples = gc.getSampleCount(),
-        // enable sample shading
-        .sample_shading_enable = vk.TRUE,
-        .min_sample_shading = 0.2,
-        .p_sample_mask = null,
-        .alpha_to_coverage_enable = vk.FALSE,
-        .alpha_to_one_enable = vk.FALSE,
-    };
-
-    const pcbas = vk.PipelineColorBlendAttachmentState{
-        .blend_enable = vk.FALSE,
-        .src_color_blend_factor = .one,
-        .dst_color_blend_factor = .zero,
-        .color_blend_op = .add,
-        .src_alpha_blend_factor = .one,
-        .dst_alpha_blend_factor = .zero,
-        .alpha_blend_op = .add,
-        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-    };
-
-    const pcbsci = vk.PipelineColorBlendStateCreateInfo{
-        .flags = .{},
-        .logic_op_enable = vk.FALSE,
-        .logic_op = .copy,
-        .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &pcbas),
-        .blend_constants = [_]f32{ 0, 0, 0, 0 },
-    };
-
-    const dynstate = [_]vk.DynamicState{ .viewport, .scissor };
-    const pdsci = vk.PipelineDynamicStateCreateInfo{
-        .flags = .{},
-        .dynamic_state_count = dynstate.len,
-        .p_dynamic_states = &dynstate,
-    };
-    const pdssci = vk.PipelineDepthStencilStateCreateInfo{
-        .flags = .{},
-        .depth_test_enable = vk.TRUE,
-        .depth_write_enable = vk.TRUE,
-        .depth_compare_op = .less,
-        .depth_bounds_test_enable = vk.FALSE,
-        .stencil_test_enable = vk.FALSE,
-        .front = undefined,
-        .back = undefined,
-        .min_depth_bounds = undefined,
-        .max_depth_bounds = undefined,
-    };
-
-    const gpci = vk.GraphicsPipelineCreateInfo{
-        .flags = .{},
-        .stage_count = 2,
-        .p_stages = &pssci,
-        .p_vertex_input_state = &pvisci,
-        .p_input_assembly_state = &piasci,
-        .p_tessellation_state = null,
-        .p_viewport_state = &pvsci,
-        .p_rasterization_state = &prsci,
-        .p_multisample_state = &pmsci,
-        .p_depth_stencil_state = &pdssci,
-        .p_color_blend_state = &pcbsci,
-        .p_dynamic_state = &pdsci,
-        .layout = layout,
-        .render_pass = render_pass,
-        .subpass = 0,
-        .base_pipeline_handle = .null_handle,
-        .base_pipeline_index = -1,
-    };
-
-    return try gc.create(gpci, srcToString(@src()));
-}
 pub fn appendGltfModel(
     arena: Allocator,
     all_meshes: *std.ArrayList(Mesh),
