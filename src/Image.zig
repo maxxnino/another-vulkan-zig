@@ -70,13 +70,13 @@ pub fn changeLayout(
     self: *Image,
     gc: GraphicsContext,
     cmdbuf: vk.CommandBuffer,
-    comptime old_layout: vk.ImageLayout,
-    comptime new_layout: vk.ImageLayout,
+    old_layout: vk.ImageLayout,
+    new_layout: vk.ImageLayout,
+    access_mask: AccessMask,
     src_stage_mask: vk.PipelineStageFlags2KHR,
     dst_stage_mask: vk.PipelineStageFlags2KHR,
     subresource_range: vk.ImageSubresourceRange,
 ) void {
-    const access_mask = accessMaskFrom(old_layout, new_layout);
     const barrier = vk.ImageMemoryBarrier2KHR{
         .src_stage_mask = src_stage_mask,
         .src_access_mask = access_mask.src,
@@ -113,15 +113,15 @@ pub fn changeLayout(
     // );
     self.layout = new_layout;
 }
-const AccessMask = struct {
+pub const AccessMask = struct {
     src: vk.AccessFlags2KHR,
     dst: vk.AccessFlags2KHR,
 };
 /// Source layouts (old)
 /// Source access mask controls actions that have to be finished on the old layout
 /// before it will be transitioned to the new layout
-pub fn accessMaskFrom(comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) AccessMask {
-    comptime var src: vk.AccessFlags2KHR = switch (old_layout) {
+pub fn accessMaskFrom(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) AccessMask {
+    var src: vk.AccessFlags2KHR = switch (old_layout) {
         // Image layout is undefined (or does not matter)
         // Only valid as initial layout
         // No flags required, listed only for completeness
@@ -153,12 +153,12 @@ pub fn accessMaskFrom(comptime old_layout: vk.ImageLayout, comptime new_layout: 
         .shader_read_only_optimal => .{ .shader_read_bit_khr = true },
 
         // Other source layouts aren't handled (yet)
-        else => @compileError("Missing " ++ @tagName(old_layout)),
+        else => unreachable,
     };
 
     // Target layouts (new)
     // Destination access mask controls the dependency for the new image layout
-    const dst = switch (new_layout) {
+    const dst: vk.AccessFlags2KHR = switch (new_layout) {
         // case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
         // Image will be used as a transfer destination
         // Make sure any writes to the image have been finished
@@ -187,7 +187,7 @@ pub fn accessMaskFrom(comptime old_layout: vk.ImageLayout, comptime new_layout: 
         },
 
         // Other source layouts aren't handled (yet)
-        else => @compileError("Missing " ++ @tagName(new_layout)),
+        else => unreachable,
     };
     return .{
         .src = src,
@@ -244,6 +244,7 @@ pub fn generateMipMap(
         cmdbuf,
         .transfer_dst_optimal,
         .transfer_src_optimal,
+        comptime accessMaskFrom(.transfer_dst_optimal, .transfer_src_optimal),
         .{ .all_transfer_bit_khr = true },
         .{ .all_transfer_bit_khr = true },
         sr,
@@ -289,6 +290,7 @@ pub fn generateMipMap(
             cmdbuf,
             .@"undefined",
             .transfer_dst_optimal,
+            comptime accessMaskFrom(.@"undefined", .transfer_dst_optimal),
             .{ .all_transfer_bit_khr = true },
             .{ .all_transfer_bit_khr = true },
             sr,
@@ -310,6 +312,7 @@ pub fn generateMipMap(
             cmdbuf,
             .transfer_dst_optimal,
             .transfer_src_optimal,
+            comptime accessMaskFrom(.transfer_dst_optimal, .transfer_src_optimal),
             .{ .all_transfer_bit_khr = true },
             .{ .all_transfer_bit_khr = true },
             sr,
@@ -321,6 +324,7 @@ pub fn generateMipMap(
         cmdbuf,
         .transfer_src_optimal,
         .shader_read_only_optimal,
+        comptime accessMaskFrom(.transfer_src_optimal, .shader_read_only_optimal),
         .{ .all_transfer_bit_khr = true },
         .{ .fragment_shader_bit_khr = true },
         subresource_range,
