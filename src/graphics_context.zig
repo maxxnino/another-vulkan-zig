@@ -12,13 +12,13 @@ const Allocator = std.mem.Allocator;
 const enable_safety = VulkanDispatch.enable_safety;
 const srcToString = @import("util.zig").srcToString;
 
-const required_device_extensions = [_][:0]const u8{
+const required_device_extensions = [_][*:0]const u8{
     vk.extension_info.khr_swapchain.name,
     vk.extension_info.ext_descriptor_indexing.name,
     vk.extension_info.khr_synchronization_2.name,
 };
 
-const required_instance_extensions = [_][:0]const u8{
+const required_instance_extensions = [_][*:0]const u8{
     vk.extension_info.ext_debug_utils.name,
 };
 
@@ -26,6 +26,10 @@ const required_device_feature = vk.PhysicalDeviceFeatures{
     .sampler_anisotropy = vk.TRUE,
     .sample_rate_shading = vk.TRUE,
 };
+
+const required_instance_layers = [_][*:0]const u8{
+    "VK_LAYER_KHRONOS_validation",
+} ++ if (enable_safety) [_][*:0]const u8{"VK_LAYER_KHRONOS_synchronization2"} else .{};
 
 const required_validation_features = [_]vk.ValidationFeatureEnableEXT{
     .gpu_assisted_ext,
@@ -109,11 +113,8 @@ pub const GraphicsContext = struct {
             .flags = .{},
             .p_next = validation_features,
             .p_application_info = &app_info,
-            .enabled_layer_count = if (enable_safety) 1 else 0,
-            .pp_enabled_layer_names = if (enable_safety) @ptrCast(
-                [*]const [*:0]const u8,
-                &"VK_LAYER_KHRONOS_validation",
-            ) else undefined,
+            .enabled_layer_count = if (enable_safety) 2 else 0,
+            .pp_enabled_layer_names = if (enable_safety) @ptrCast([*]const [*:0]const u8, &required_instance_layers) else undefined,
             .enabled_extension_count = @intCast(u32, instance_exts.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &instance_exts[0]),
         }, null);
@@ -145,7 +146,7 @@ pub const GraphicsContext = struct {
         const candidate = try pickPhysicalDevice(self.vki, self.instance, allocator, self.surface);
         self.pdev = candidate.pdev;
         self.props = candidate.props;
-        self.dev = try initializeCandidate(self.vki, candidate, allocator);
+        self.dev = try initializeCandidate(self.vki, candidate);
         self.vkd = try DeviceDispatch.load(self.dev, self.vki.dispatch.vkGetDeviceProcAddr);
         try self.markHandle(self.dev, .device, srcToString(@src()));
         errdefer self.vkd.destroyDevice(self.dev, null);
@@ -314,7 +315,7 @@ fn createSurface(instance: vk.Instance, window: glfw.Window) !vk.SurfaceKHR {
     return surface;
 }
 
-fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate, allocator: Allocator) !vk.Device {
+fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.Device {
     const priority = [_]f32{1};
     const qci = [_]vk.DeviceQueueCreateInfo{
         .{
@@ -336,15 +337,6 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate, alloca
     else
         2;
 
-    var device_exts = try std.ArrayList([*:0]const u8).initCapacity(
-        allocator,
-        required_device_extensions.len,
-    );
-    defer device_exts.deinit();
-    for (required_device_extensions) |e| {
-        try device_exts.append(e);
-    }
-
     // enable khr_synchronization_2 feature
     const khr_synchronization_2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
         .synchronization_2 = vk.TRUE,
@@ -357,8 +349,8 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate, alloca
         .p_queue_create_infos = &qci,
         .enabled_layer_count = 0,
         .pp_enabled_layer_names = undefined,
-        .enabled_extension_count = @truncate(u32, device_exts.items.len),
-        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &device_exts.items[0]),
+        .enabled_extension_count = required_device_extensions.len,
+        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &required_device_extensions),
         .p_enabled_features = &required_device_feature,
     }, null);
 }
@@ -497,7 +489,7 @@ fn checkExtensionSupport(
         for (propsv) |props| {
             const len = std.mem.indexOfScalar(u8, &props.extension_name, 0).?;
             const prop_ext_name = props.extension_name[0..len];
-            if (std.mem.eql(u8, ext, prop_ext_name)) {
+            if (std.mem.eql(u8, std.mem.span(ext), prop_ext_name)) {
                 break;
             }
         } else {
