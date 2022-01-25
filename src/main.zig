@@ -13,10 +13,12 @@ const Texture = tex.Texture;
 const Shader = @import("Shader.zig");
 const ShaderBinding = @import("ShaderBinding.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
+const Pipeline = @import("Pipeline.zig");
+const Vertex = @import("Vertex.zig");
 const srcToString = @import("util.zig").srcToString;
 
-const z = @import("zalgebra");
 const assert = std.debug.assert;
+const z = @import("zalgebra");
 const Mat4 = z.Mat4;
 const Vec3 = z.Vec3;
 const Vec2 = z.Vec2;
@@ -30,12 +32,16 @@ const UniformBufferObject = struct {
     proj: Mat4,
 };
 
-const Vertex = BasicRenderer.Vertex;
 const Mesh = struct {
     index_offset: u32,
     vertex_offset: u32,
     num_indices: u32,
     num_vertices: u32,
+};
+
+const Model = struct {
+    mesh_begin: u32,
+    mesh_end: u32,
 };
 const Gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = false });
 
@@ -45,9 +51,12 @@ pub fn main() !void {
 
     const monitor = glfw.Monitor.getPrimary().?;
     const mode = try monitor.getVideoMode();
-    var extent = vk.Extent2D{ .width = mode.getWidth(), .height = mode.getHeight() };
+    const is_fullscreen = false;
+    var extent: vk.Extent2D =
+        if (is_fullscreen)
+    .{ .width = mode.getWidth(), .height = mode.getHeight() } else .{ .width = 800, .height = 600 };
 
-    const window = try glfw.Window.create(extent.width, extent.height, app_name, monitor, null, .{
+    const window = try glfw.Window.create(extent.width, extent.height, app_name, if (is_fullscreen) monitor else null, null, .{
         .client_api = .no_api,
     });
     defer window.destroy();
@@ -63,6 +72,16 @@ pub fn main() !void {
     defer meshs.deinit();
     var arena = std.heap.ArenaAllocator.init(allocator);
     appendGltfModel(arena.allocator(), &meshs, &vertices, &indices, "assets/untitled.gltf");
+    const viking_room = Model{
+        .mesh_begin = 0,
+        .mesh_end = @truncate(u32, meshs.items.len),
+    };
+    appendGltfModel(arena.allocator(), &meshs, &vertices, &indices, "assets/cube.gltf");
+    const cube = Model{
+        .mesh_begin = viking_room.mesh_end,
+        .mesh_end = @truncate(u32, meshs.items.len),
+    };
+    arena.deinit();
     //*********************************
 
     const gc = try GraphicsContext.init(allocator, app_name, window);
@@ -84,6 +103,10 @@ pub fn main() !void {
             .binding = 0,
             .descriptor_type = .uniform_buffer,
         }},
+        &.{
+            .binding = &Vertex.binding_description,
+            .attribute = &Vertex.attribute_description,
+        },
         srcToString(@src()),
     );
     defer vert_shader.deinit(gc);
@@ -98,6 +121,7 @@ pub fn main() !void {
             .binding = 1,
             .descriptor_type = .combined_image_sampler,
         }},
+        null,
         srcToString(@src()),
     );
     defer frag_shader.deinit(gc);
@@ -133,14 +157,80 @@ pub fn main() !void {
 
     const texture = try Texture.loadFromFile(
         gc,
+        .texture,
         "assets/viking_room.png",
-        .{ .@"type" = .texture, .anisotropy = true, .mip_map = true },
+        .{ .anisotropy = true, .mip_map = true },
     );
     defer texture.deinit(gc);
 
+    // ================= Skybox ===================
+    const skybox_texture = try Texture.loadFromFile(
+        gc,
+        .cube_map,
+        "assets/cube_map.png",
+        .{ .anisotropy = true, .mip_map = true },
+    );
+    defer skybox_texture.deinit(gc);
+    const skybox_vert = try Shader.createFromMemory(
+        gc,
+        allocator,
+        resources.skybox_vert,
+        "main",
+        .{ .vertex_bit = true },
+        &[_]Shader.BindingInfo{.{
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
+        }},
+        &.{
+            .binding = &[_]vk.VertexInputBindingDescription{.{
+                .binding = 0,
+                .stride = @sizeOf(Vertex),
+                .input_rate = .vertex,
+            }},
+            .attribute = &[_]vk.VertexInputAttributeDescription{
+                .{
+                    .binding = 0,
+                    .location = 0,
+                    .format = .r32g32b32_sfloat,
+                    .offset = 0,
+                },
+            },
+        },
+        srcToString(@src()),
+    );
+    defer skybox_vert.deinit(gc);
+
+    const skybox_frag = try Shader.createFromMemory(
+        gc,
+        allocator,
+        resources.skybox_frag,
+        "main",
+        .{ .fragment_bit = true },
+        &[_]Shader.BindingInfo{.{
+            .binding = 1,
+            .descriptor_type = .combined_image_sampler,
+        }},
+        null,
+        srcToString(@src()),
+    );
+    defer skybox_frag.deinit(gc);
+
+    var skybox_binding = ShaderBinding.init(allocator);
+    defer skybox_binding.deinit();
+    try skybox_binding.addShader(skybox_vert);
+    try skybox_binding.addShader(skybox_frag);
+    const skybox_pipeline = try Pipeline.createSkyboxPipeline(
+        gc,
+        renderer.render_pass,
+        skybox_binding,
+        .{},
+        "skybox" ++ srcToString(@src()),
+    );
+    defer skybox_pipeline.deinit(gc);
+    // ============================================
     var camera = Camera{
-        .pitch = 30,
-        .yaw = 220,
+        .pitch = 0,
+        .yaw = 0,
         .pos = Vec3.new(0, 2, 4),
     };
 
@@ -163,6 +253,28 @@ pub fn main() !void {
         ubo.deinit(gc);
     };
 
+    // ==== skybox ubo=====
+
+    //     var ubo_sky = try allocator.alloc(Buffer, framebuffers.len);
+
+    //     for (ubo_sku) |*ubo| {
+    //         ubo.* = try Buffer.init(gc, Buffer.CreateInfo{
+    //             .size = @sizeOf(UniformBufferObject),
+    //             .buffer_usage = .{ .uniform_buffer_bit = true },
+    //             .memory_usage = .cpu_to_gpu,
+    //             .memory_flags = .{},
+    //         }, srcToString(@src()));
+    //         try ubo.update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
+    //             .model = Mat4.identity(),
+    //             .view = Mat4.setVec4.new(0,0,0,1),
+    //             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
+    //         }});
+    //     }
+    //     defer for (ubo_sky) |ubo| {
+    //         ubo.deinit(gc);
+    //     };
+    // ====================
+
     const index_buffer = try Buffer.init(gc, Buffer.CreateInfo{
         .size = @sizeOf(u32) * indices.items.len,
         .buffer_usage = .{ .transfer_dst_bit = true, .index_buffer_bit = true },
@@ -177,23 +289,24 @@ pub fn main() !void {
     try uploadData(u32, gc, index_buffer, indices.items);
 
     // Desciptor Set
+    const pool_size = frame_size * 2;
     const pool_sizes = [_]vk.DescriptorPoolSize{ .{
         .@"type" = .uniform_buffer,
-        .descriptor_count = frame_size,
+        .descriptor_count = pool_size,
     }, .{
         .@"type" = .combined_image_sampler,
-        .descriptor_count = frame_size,
+        .descriptor_count = pool_size,
     } };
     const descriptor_pool = try gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
-        .max_sets = frame_size,
+        .max_sets = pool_size,
         .pool_size_count = @truncate(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
     }, srcToString(@src()));
     defer gc.destroy(descriptor_pool);
     var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
     for (des_layouts) |*l| {
-        l.* = renderer.descriptor_set_layout;
+        l.* = renderer.pipeline.descriptor_set_layout;
     }
     defer allocator.free(des_layouts);
     const dsai = vk.DescriptorSetAllocateInfo{
@@ -206,6 +319,14 @@ pub fn main() !void {
     try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, des_sets.ptr);
     for (des_sets) |ds, i| {
         updateDescriptorSet(gc, ds, ubo_buffers[i], texture);
+    }
+
+    // =====skybox descriptor ====
+    var skybox_des = try allocator.alloc(vk.DescriptorSet, frame_size);
+    defer allocator.free(skybox_des);
+    try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, skybox_des.ptr);
+    for (skybox_des) |ds, i| {
+        updateDescriptorSet(gc, ds, ubo_buffers[i], skybox_texture);
     }
     //End descriptor set
 
@@ -229,6 +350,10 @@ pub fn main() !void {
         index_buffer.buffer,
         des_sets,
         meshs.items,
+        viking_room,
+        cube,
+        skybox_pipeline,
+        skybox_des,
     );
 
     //*********************************
@@ -276,6 +401,10 @@ pub fn main() !void {
                 index_buffer.buffer,
                 des_sets,
                 meshs.items,
+                viking_room,
+                cube,
+                skybox_pipeline,
+                skybox_des,
             );
         }
 
@@ -342,6 +471,10 @@ fn buildCommandBuffers(
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     meshs: []const Mesh,
+    viking_room: Model,
+    cube: Model,
+    skybox: Pipeline,
+    skybox_des: []vk.DescriptorSet,
 ) !void {
     for (framebuffers) |*framebuffer, i| {
         const cmdbuf = cmdbufs[i];
@@ -353,15 +486,32 @@ fn buildCommandBuffers(
         gc.vkd.cmdBindDescriptorSets(
             cmdbuf,
             .graphics,
-            renderer.pipeline_layout,
+            renderer.pipeline.pipeline_layout,
             0,
             1,
             @ptrCast([*]const vk.DescriptorSet, &sets[i]),
             0,
             undefined,
         );
-        for (meshs) |m| {
-            gc.vkd.cmdDrawIndexed(cmdbuf, m.num_indices, 1, m.index_offset, @intCast(i32, m.vertex_offset), 0);
+        var j: u32 = viking_room.mesh_begin;
+        while (j < viking_room.mesh_end) : (j += 1) {
+            gc.vkd.cmdDrawIndexed(cmdbuf, meshs[j].num_indices, 1, meshs[j].index_offset, @intCast(i32, meshs[j].vertex_offset), 0);
+        }
+
+        skybox.bind(gc, cmdbuf);
+        gc.vkd.cmdBindDescriptorSets(
+            cmdbuf,
+            .graphics,
+            renderer.pipeline.pipeline_layout,
+            0,
+            1,
+            @ptrCast([*]const vk.DescriptorSet, &skybox_des[i]),
+            0,
+            undefined,
+        );
+        j = cube.mesh_begin;
+        while (j < cube.mesh_end) : (j += 1) {
+            gc.vkd.cmdDrawIndexed(cmdbuf, meshs[j].num_indices, 1, meshs[j].index_offset, @intCast(i32, meshs[j].vertex_offset), 0);
         }
         try renderer.endFrame(gc, cmdbuf);
     }
@@ -411,8 +561,8 @@ pub fn appendGltfModel(
 
     const num_meshes = @truncate(u32, data.meshes_count);
     var mesh_index: u32 = 0;
-    // const base_indices = @truncate(u32, all_indices.items.len);
-    // const base_vertices = @truncate(u32, all_vertices.items.len);
+    const base_indices = @truncate(u32, all_indices.items.len);
+    const base_vertices = @truncate(u32, all_vertices.items.len);
 
     while (mesh_index < num_meshes) : (mesh_index += 1) {
         const num_prims = @intCast(u32, data.meshes[mesh_index].primitives_count);
@@ -425,8 +575,8 @@ pub fn appendGltfModel(
             appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, &texcoords0, null);
 
             all_meshes.append(.{
-                .index_offset = @intCast(u32, pre_indices_len),
-                .vertex_offset = @intCast(u32, pre_positions_len),
+                .index_offset = @intCast(u32, base_indices + pre_indices_len),
+                .vertex_offset = @intCast(u32, base_vertices + pre_positions_len),
                 .num_indices = @intCast(u32, indices.items.len - pre_indices_len),
                 .num_vertices = @intCast(u32, positions.items.len - pre_positions_len),
             }) catch unreachable;

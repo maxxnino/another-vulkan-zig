@@ -17,15 +17,13 @@ pub const Texture = struct {
 
         /// true mean enable mip map
         mip_map: bool = false,
-
-        @"type": TextureType,
     };
     image: Image,
     view: vk.ImageView,
     smapler: vk.Sampler,
     config: Config,
 
-    pub fn loadFromFile(gc: GraphicsContext, filename: [*:0]const u8, comptime config: Config) !Texture {
+    pub fn loadFromFile(gc: GraphicsContext, comptime @"type": TextureType, filename: [*:0]const u8, config: Config) !Texture {
         var texture: Texture = undefined;
         texture.config = config;
         const data = try StbImage.loadFromFile(filename, .rgb_alpha);
@@ -39,23 +37,24 @@ pub const Texture = struct {
         }, filename);
         defer stage_buffer.deinit(gc);
         try stage_buffer.update(u8, gc, data.pixels);
-        const width = switch (config.@"type") {
+        const width = switch (@"type") {
             .texture => data.width,
             .cube_map => data.width / 6,
         };
+        const height = data.height;
 
-        const mip_levels = if (config.mip_map) calcMipLevel(width, data.height) else 1;
+        const mip_levels = if (config.mip_map) calcMipLevel(width, height) else 1;
         texture.image = try Image.init(gc, .{
-            .flags = if (config.@"type" == .cube_map) .{ .cube_compatible_bit = true } else .{},
+            .flags = if (@"type" == .cube_map) .{ .cube_compatible_bit = true } else .{},
             .image_type = .@"2d",
             .format = .r8g8b8a8_srgb,
             .extent = .{
                 .width = width,
-                .height = data.height,
+                .height = height,
                 .depth = 1,
             },
             .mip_levels = mip_levels,
-            .array_layers = if (config.@"type" == .cube_map) 6 else 1,
+            .array_layers = if (@"type" == .cube_map) 6 else 1,
             .samples = .{ .@"1_bit" = true },
             .tiling = .optimal,
             .usage = .{
@@ -69,10 +68,10 @@ pub const Texture = struct {
         var subresource_range = vk.ImageSubresourceRange{
             .aspect_mask = .{ .color_bit = true },
             .base_mip_level = 0,
-            // Only copy to the first layer, so level count 1,
+            // Only copy to the first mip map level,
             .level_count = 1,
             .base_array_layer = 0,
-            .layer_count = 1,
+            .layer_count = if (@"type" == .cube_map) 6 else 1,
         };
 
         const cmdbuf = try gc.beginOneTimeCommandBuffer();
@@ -90,12 +89,80 @@ pub const Texture = struct {
             subresource_range,
         );
         // Copy the first mip of the chain, remaining mips will be generated if needed
-        texture.image.copyFromBuffer(gc, cmdbuf, stage_buffer, data.width, data.height);
+        const bic = blk: {
+            if (@"type" == .cube_map) {
+                var temp: [6]vk.BufferImageCopy = undefined;
+                const base_offset = data.byteFromSize(width);
+                for (temp) |*t, index| {
+                    const i = @truncate(u32, index);
+                    t.* = vk.BufferImageCopy{
+                        .buffer_offset = base_offset * i,
+                        .buffer_row_length = data.width,
+                        .buffer_image_height = height,
+                        .image_subresource = .{
+                            .aspect_mask = .{ .color_bit = true },
+                            .mip_level = 0,
+                            .base_array_layer = i,
+                            .layer_count = 1,
+                        },
+                        .image_offset = .{
+                            .x = 0,
+                            .y = 0,
+                            .z = 0,
+                        },
+                        .image_extent = .{
+                            .width = width,
+                            .height = height,
+                            .depth = 1,
+                        },
+                    };
+                }
+                break :blk temp;
+            }
+            break :blk [_]vk.BufferImageCopy{.{
+                .buffer_offset = 0,
+                .buffer_row_length = 0,
+                .buffer_image_height = 0,
+                .image_subresource = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .mip_level = 0,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+                .image_offset = .{
+                    .x = 0,
+                    .y = 0,
+                    .z = 0,
+                },
+                .image_extent = .{
+                    .width = width,
+                    .height = height,
+                    .depth = 1,
+                },
+            }};
+        };
+        gc.vkd.cmdCopyBufferToImage(
+            cmdbuf,
+            stage_buffer.buffer,
+            texture.image.image,
+            .transfer_dst_optimal,
+            bic.len,
+            &bic,
+        );
 
         if (mip_levels > 1) {
             // pass total mip level to generate
             subresource_range.level_count = mip_levels;
-            texture.image.generateMipMap(gc, cmdbuf, subresource_range);
+            subresource_range.layer_count = 1;
+            if (@"type" == .cube_map) {
+                var i: u32 = 0;
+                while (i < 6) : (i += 1) {
+                    subresource_range.base_array_layer = i;
+                    texture.image.generateMipMap(gc, cmdbuf, subresource_range);
+                }
+            } else {
+                texture.image.generateMipMap(gc, cmdbuf, subresource_range);
+            }
         } else {
             texture.image.changeLayout(
                 gc,
@@ -114,10 +181,16 @@ pub const Texture = struct {
         texture.view = try gc.create(vk.ImageViewCreateInfo{
             .flags = .{},
             .image = texture.image.image,
-            .view_type = .@"2d",
+            .view_type = if (@"type" == .cube_map) .cube else .@"2d",
             .format = texture.image.format,
             .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-            .subresource_range = subresource_range,
+            .subresource_range = .{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = mip_levels,
+                .base_array_layer = 0,
+                .layer_count = if (@"type" == .cube_map) 6 else 1,
+            },
         }, filename);
 
         texture.smapler = try gc.create(vk.SamplerCreateInfo{

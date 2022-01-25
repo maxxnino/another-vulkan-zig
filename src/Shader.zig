@@ -9,10 +9,16 @@ pub const BindingInfo = struct {
     descriptor_type: vk.DescriptorType,
 };
 
+pub const VertexInputDescription = struct {
+    binding: []const vk.VertexInputBindingDescription,
+    attribute: []const vk.VertexInputAttributeDescription,
+};
+
 module: vk.ShaderModule,
 entry: [*:0]const u8,
 stage: vk.ShaderStageFlags,
 bindings_info: []const BindingInfo,
+vertex_info: ?*const VertexInputDescription,
 
 pub fn createFromMemory(
     gc: GraphicsContext,
@@ -21,9 +27,13 @@ pub fn createFromMemory(
     entry: [*:0]const u8,
     stage: vk.ShaderStageFlags,
     bindings_info: []const BindingInfo,
+    vertex_info: ?*const VertexInputDescription,
     label: ?[*:0]const u8,
 ) !Self {
     verifyBinding(allocator, bindings_info);
+    if (!stage.contains(.{ .vertex_bit = true })) {
+        std.debug.assert(vertex_info == null);
+    }
     var shader: Self = undefined;
 
     shader.module = try gc.create(vk.ShaderModuleCreateInfo{
@@ -34,6 +44,7 @@ pub fn createFromMemory(
     shader.entry = entry;
     shader.stage = stage;
     shader.bindings_info = bindings_info;
+    shader.vertex_info = vertex_info;
     return shader;
 }
 

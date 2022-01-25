@@ -99,18 +99,6 @@ pub fn changeLayout(
         .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2KHR, &barrier),
     };
     gc.vkd.cmdPipelineBarrier2KHR(cmdbuf, &di);
-    // gc.vkd.cmdPipelineBarrier(
-    //     cmdbuf,
-    //     src_stage_mask,
-    //     dst_stage_mask,
-    //     .{},
-    //     0,
-    //     undefined,
-    //     0,
-    //     undefined,
-    //     1,
-    //     @ptrCast([*]const vk.ImageMemoryBarrier, &barrier),
-    // );
     self.layout = new_layout;
 }
 pub const AccessMask = struct {
@@ -195,37 +183,37 @@ pub fn accessMaskFrom(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) Ac
     };
 }
 
-pub fn copyFromBuffer(self: Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, src: Buffer, width: u32, height: u32) void {
-    const bic = vk.BufferImageCopy{
-        .buffer_offset = 0,
-        .buffer_row_length = 0,
-        .buffer_image_height = 0,
-        .image_subresource = .{
-            .aspect_mask = .{ .color_bit = true },
-            .mip_level = 0,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-        .image_offset = .{
-            .x = 0,
-            .y = 0,
-            .z = 0,
-        },
-        .image_extent = .{
-            .width = width,
-            .height = height,
-            .depth = 1,
-        },
-    };
-    gc.vkd.cmdCopyBufferToImage(
-        cmdbuf,
-        src.buffer,
-        self.image,
-        .transfer_dst_optimal,
-        1,
-        @ptrCast([*]const vk.BufferImageCopy, &bic),
-    );
-}
+// pub fn copyFromBuffer(self: Image, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, src: Buffer, buffer) void {
+//     const bic = vk.BufferImageCopy{
+//         .buffer_offset = 0,
+//         .buffer_row_length = 0,
+//         .buffer_image_height = 0,
+//         .image_subresource = .{
+//             .aspect_mask = .{ .color_bit = true },
+//             .mip_level = 0,
+//             .base_array_layer = 0,
+//             .layer_count = 1,
+//         },
+//         .image_offset = .{
+//             .x = 0,
+//             .y = 0,
+//             .z = 0,
+//         },
+//         .image_extent = .{
+//             .width = width,
+//             .height = height,
+//             .depth = 1,
+//         },
+//     };
+//     gc.vkd.cmdCopyBufferToImage(
+//         cmdbuf,
+//         src.buffer,
+//         self.image,
+//         .transfer_dst_optimal,
+//         1,
+//         @ptrCast([*]const vk.BufferImageCopy, &bic),
+//     );
+// }
 
 pub fn generateMipMap(
     self: *Image,
@@ -233,7 +221,7 @@ pub fn generateMipMap(
     cmdbuf: vk.CommandBuffer,
     subresource_range: vk.ImageSubresourceRange,
 ) void {
-    std.debug.assert(self.layout == .transfer_dst_optimal);
+    // std.debug.assert(self.layout == .transfer_dst_optimal);
     var sr = subresource_range;
     sr.level_count = 1;
     sr.base_mip_level = 0;
