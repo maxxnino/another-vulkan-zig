@@ -10,7 +10,6 @@ descriptor_set_layout: vk.DescriptorSetLayout,
 pipeline_layout: vk.PipelineLayout,
 
 pub const Options = struct {
-    depth: bool = true,
     msaa: bool = true,
     ssaa: bool = true,
 };
@@ -227,8 +226,8 @@ pub fn createBasicPipeline(
     };
     const pdssci = vk.PipelineDepthStencilStateCreateInfo{
         .flags = .{},
-        .depth_test_enable = if (opts.depth) vk.TRUE else vk.FALSE,
-        .depth_write_enable = if (opts.depth) vk.TRUE else vk.FALSE,
+        .depth_test_enable = vk.TRUE,
+        .depth_write_enable = vk.TRUE,
         .depth_compare_op = .less,
         .depth_bounds_test_enable = vk.FALSE,
         .stencil_test_enable = vk.FALSE,

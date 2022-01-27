@@ -41,6 +41,7 @@ pub fn getProjMatrix(self: Camera, width: u32, height: u32) Mat4 {
 pub fn moveCamera(self: *Camera, window: glfw.Window, dt: f32) void {
     var x_dir: f32 = 0;
     var y_dir: f32 = 0;
+
     if (window.getKey(.j) == .press) y_dir += dt;
     if (window.getKey(.k) == .press) y_dir -= dt;
     if (window.getKey(.h) == .press) x_dir += dt;

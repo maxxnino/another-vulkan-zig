@@ -15,7 +15,12 @@ const ShaderBinding = @import("ShaderBinding.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
 const Pipeline = @import("Pipeline.zig");
 const Vertex = @import("Vertex.zig");
+const Model = @import("Model.zig");
+const Mesh = Model.Mesh;
 const srcToString = @import("util.zig").srcToString;
+
+const command_pool = @import("command_pool.zig");
+const DrawPool = command_pool.DrawPool;
 
 const assert = std.debug.assert;
 const z = @import("zalgebra");
@@ -32,17 +37,6 @@ const UniformBufferObject = struct {
     proj: Mat4,
 };
 
-const Mesh = struct {
-    index_offset: u32,
-    vertex_offset: u32,
-    num_indices: u32,
-    num_vertices: u32,
-};
-
-const Model = struct {
-    mesh_begin: u32,
-    mesh_end: u32,
-};
 const Gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = false });
 
 pub fn main() !void {
@@ -229,8 +223,8 @@ pub fn main() !void {
     defer skybox_pipeline.deinit(gc);
     // ============================================
     var camera = Camera{
-        .pitch = 0,
-        .yaw = 0,
+        .pitch = 270,
+        .yaw = 30,
         .pos = Vec3.new(0, 2, 4),
     };
 
@@ -252,28 +246,6 @@ pub fn main() !void {
     defer for (ubo_buffers) |ubo| {
         ubo.deinit(gc);
     };
-
-    // ==== skybox ubo=====
-
-    //     var ubo_sky = try allocator.alloc(Buffer, framebuffers.len);
-
-    //     for (ubo_sku) |*ubo| {
-    //         ubo.* = try Buffer.init(gc, Buffer.CreateInfo{
-    //             .size = @sizeOf(UniformBufferObject),
-    //             .buffer_usage = .{ .uniform_buffer_bit = true },
-    //             .memory_usage = .cpu_to_gpu,
-    //             .memory_flags = .{},
-    //         }, srcToString(@src()));
-    //         try ubo.update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
-    //             .model = Mat4.identity(),
-    //             .view = Mat4.setVec4.new(0,0,0,1),
-    //             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
-    //         }});
-    //     }
-    //     defer for (ubo_sky) |ubo| {
-    //         ubo.deinit(gc);
-    //     };
-    // ====================
 
     const index_buffer = try Buffer.init(gc, Buffer.CreateInfo{
         .size = @sizeOf(u32) * indices.items.len,
@@ -330,33 +302,9 @@ pub fn main() !void {
     }
     //End descriptor set
 
-    //******** Command Buffer **********
-    var command_buffers = try allocator.alloc(vk.CommandBuffer, framebuffers.len);
-    defer allocator.free(command_buffers);
+    var draw_pool = try DrawPool.init(gc, srcToString(@src()));
+    defer draw_pool.deinit(gc);
 
-    try gc.vkd.allocateCommandBuffers(gc.dev, &.{
-        .command_pool = gc.pool,
-        .level = .primary,
-        .command_buffer_count = @truncate(u32, command_buffers.len),
-    }, command_buffers.ptr);
-    defer gc.vkd.freeCommandBuffers(gc.dev, gc.pool, @truncate(u32, command_buffers.len), command_buffers.ptr);
-
-    try buildCommandBuffers(
-        gc,
-        renderer,
-        framebuffers,
-        command_buffers,
-        vertex_buffer.buffer,
-        index_buffer.buffer,
-        des_sets,
-        meshs.items,
-        viking_room,
-        cube,
-        skybox_pipeline,
-        skybox_des,
-    );
-
-    //*********************************
     //Timer
     var update_timer = try std.time.Timer.start();
 
@@ -368,10 +316,25 @@ pub fn main() !void {
             .view = camera.getViewMatrix(),
             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
         }});
+        const cmdbuf = draw_pool.createCommandBuffer();
 
-        const cmdbuf = command_buffers[swapchain.image_index];
+        try buildCommandBuffers(
+            gc,
+            renderer,
+            swapchain.image_index,
+            framebuffers[swapchain.image_index],
+            cmdbuf.cmd,
+            vertex_buffer.buffer,
+            index_buffer.buffer,
+            des_sets,
+            meshs.items,
+            viking_room,
+            cube,
+            skybox_pipeline,
+            skybox_des,
+        );
 
-        const state = swapchain.present(cmdbuf) catch |err| switch (err) {
+        const state = swapchain.present(cmdbuf, &draw_pool) catch |err| switch (err) {
             error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
             else => |narrow| return narrow,
         };
@@ -384,28 +347,6 @@ pub fn main() !void {
 
             destroyFramebuffers(&gc, allocator, framebuffers);
             framebuffers = try createFramebuffers(gc, allocator, swapchain, &renderer, srcToString(@src()));
-
-            gc.vkd.freeCommandBuffers(gc.dev, gc.pool, @truncate(u32, command_buffers.len), command_buffers.ptr);
-            try gc.vkd.allocateCommandBuffers(gc.dev, &.{
-                .command_pool = gc.pool,
-                .level = .primary,
-                .command_buffer_count = @truncate(u32, command_buffers.len),
-            }, command_buffers.ptr);
-
-            try buildCommandBuffers(
-                gc,
-                renderer,
-                framebuffers,
-                command_buffers,
-                vertex_buffer.buffer,
-                index_buffer.buffer,
-                des_sets,
-                meshs.items,
-                viking_room,
-                cube,
-                skybox_pipeline,
-                skybox_des,
-            );
         }
 
         try glfw.pollEvents();
@@ -465,8 +406,9 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
 fn buildCommandBuffers(
     gc: GraphicsContext,
     renderer: BasicRenderer,
-    framebuffers: []const vk.Framebuffer,
-    cmdbufs: []const vk.CommandBuffer,
+    i: u32,
+    framebuffer: vk.Framebuffer,
+    cmdbuf: vk.CommandBuffer,
     vertex_buffer: vk.Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
@@ -476,45 +418,36 @@ fn buildCommandBuffers(
     skybox: Pipeline,
     skybox_des: []vk.DescriptorSet,
 ) !void {
-    for (framebuffers) |*framebuffer, i| {
-        const cmdbuf = cmdbufs[i];
-        try renderer.beginFrame(gc, framebuffer.*, cmdbuf);
+    try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
-        const offset = [_]vk.DeviceSize{0};
-        gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast([*]const vk.Buffer, &vertex_buffer), &offset);
-        gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
-        gc.vkd.cmdBindDescriptorSets(
-            cmdbuf,
-            .graphics,
-            renderer.pipeline.pipeline_layout,
-            0,
-            1,
-            @ptrCast([*]const vk.DescriptorSet, &sets[i]),
-            0,
-            undefined,
-        );
-        var j: u32 = viking_room.mesh_begin;
-        while (j < viking_room.mesh_end) : (j += 1) {
-            gc.vkd.cmdDrawIndexed(cmdbuf, meshs[j].num_indices, 1, meshs[j].index_offset, @intCast(i32, meshs[j].vertex_offset), 0);
-        }
+    const offset = [_]vk.DeviceSize{0};
+    gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast([*]const vk.Buffer, &vertex_buffer), &offset);
+    gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
+    gc.vkd.cmdBindDescriptorSets(
+        cmdbuf,
+        .graphics,
+        renderer.pipeline.pipeline_layout,
+        0,
+        1,
+        @ptrCast([*]const vk.DescriptorSet, &sets[i]),
+        0,
+        undefined,
+    );
+    viking_room.draw(gc, cmdbuf, meshs);
 
-        skybox.bind(gc, cmdbuf);
-        gc.vkd.cmdBindDescriptorSets(
-            cmdbuf,
-            .graphics,
-            renderer.pipeline.pipeline_layout,
-            0,
-            1,
-            @ptrCast([*]const vk.DescriptorSet, &skybox_des[i]),
-            0,
-            undefined,
-        );
-        j = cube.mesh_begin;
-        while (j < cube.mesh_end) : (j += 1) {
-            gc.vkd.cmdDrawIndexed(cmdbuf, meshs[j].num_indices, 1, meshs[j].index_offset, @intCast(i32, meshs[j].vertex_offset), 0);
-        }
-        try renderer.endFrame(gc, cmdbuf);
-    }
+    skybox.bind(gc, cmdbuf);
+    gc.vkd.cmdBindDescriptorSets(
+        cmdbuf,
+        .graphics,
+        renderer.pipeline.pipeline_layout,
+        0,
+        1,
+        @ptrCast([*]const vk.DescriptorSet, &skybox_des[i]),
+        0,
+        undefined,
+    );
+    cube.draw(gc, cmdbuf, meshs);
+    try renderer.endFrame(gc, cmdbuf);
 }
 
 fn createFramebuffers(
@@ -576,7 +509,7 @@ pub fn appendGltfModel(
 
             all_meshes.append(.{
                 .index_offset = @intCast(u32, base_indices + pre_indices_len),
-                .vertex_offset = @intCast(u32, base_vertices + pre_positions_len),
+                .vertex_offset = @intCast(i32, base_vertices + pre_positions_len),
                 .num_indices = @intCast(u32, indices.items.len - pre_indices_len),
                 .num_vertices = @intCast(u32, positions.items.len - pre_positions_len),
             }) catch unreachable;

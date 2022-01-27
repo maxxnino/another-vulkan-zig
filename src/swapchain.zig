@@ -1,7 +1,11 @@
 const std = @import("std");
 const vk = @import("vulkan");
+const CommandBuffer = @import("command_pool.zig").CommandBuffer;
 const srcToString = @import("util.zig").srcToString;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
+
+const command_pool = @import("command_pool.zig");
+const DrawPool = command_pool.DrawPool;
 const Allocator = std.mem.Allocator;
 
 pub const Swapchain = struct {
@@ -131,7 +135,7 @@ pub const Swapchain = struct {
         return &self.swap_images[self.image_index];
     }
 
-    pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
+    pub fn present(self: *Swapchain, cmdbuf: CommandBuffer, draw_pool: *DrawPool) !PresentState {
         // Simple method:
         // 1) Acquire next image
         // 2) Wait for and reset fence of the acquired image
@@ -152,9 +156,14 @@ pub const Swapchain = struct {
         // Step 1: Make sure the current frame has finished rendering
         const current = self.currentSwapImage();
         try current.waitForFence(self.gc);
+        if (current.cmdbuf) |cmd| {
+            try draw_pool.done(self.gc.*, cmd);
+        }
+
         try self.gc.vkd.resetFences(self.gc.dev, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
 
         // Step 2: Submit the command buffer
+        self.swap_images[self.image_index].cmdbuf = cmdbuf;
 
         try self.gc.vkd.queueSubmit2KHR(self.gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo2KHR{.{
             .flags = .{},
@@ -167,7 +176,7 @@ pub const Swapchain = struct {
             }},
             .command_buffer_info_count = 1,
             .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfoKHR{.{
-                .command_buffer = cmdbuf,
+                .command_buffer = cmdbuf.cmd,
                 .device_mask = 0,
             }},
             .signal_semaphore_info_count = 1,
@@ -215,6 +224,7 @@ const SwapImage = struct {
     image_acquired: vk.Semaphore,
     render_finished: vk.Semaphore,
     frame_fence: vk.Fence,
+    cmdbuf: ?CommandBuffer = null,
 
     fn init(gc: *const GraphicsContext, image: vk.Image, format: vk.Format) !SwapImage {
         const view = try gc.create(vk.ImageViewCreateInfo{

@@ -93,6 +93,7 @@ const device_command = [_]vk.DeviceCommand{
     .allocateDescriptorSets,
     .updateDescriptorSets,
     .beginCommandBuffer,
+    .resetCommandPool,
     .endCommandBuffer,
     .cmdDraw,
     .cmdBlitImage,

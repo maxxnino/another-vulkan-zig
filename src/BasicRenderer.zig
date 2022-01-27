@@ -8,8 +8,8 @@ const Options = Pipeline.Options;
 
 pipeline: Pipeline,
 render_pass: vk.RenderPass,
-depth: ?tex.DepthStencilTexture,
-msaa: ?tex.RenderTarget,
+depth: tex.DepthStencilTexture,
+msaa: tex.RenderTarget,
 extent: vk.Extent2D,
 format: vk.Format,
 label: ?[*:0]const u8,
@@ -58,8 +58,8 @@ pub fn init(
 pub fn deinit(self: Self, gc: GraphicsContext) void {
     self.pipeline.deinit(gc);
     gc.destroy(self.render_pass);
-    if (self.depth) |d| d.deinit(gc);
-    if (self.msaa) |m| m.deinit(gc);
+    self.depth.deinit(gc);
+    self.msaa.deinit(gc);
 }
 
 pub fn beginFrame(self: Self, gc: GraphicsContext, framebuffer: vk.Framebuffer, cmdbuf: vk.CommandBuffer) !void {
@@ -119,8 +119,8 @@ pub fn createFrameBuffer(self: *Self, gc: GraphicsContext, extent: vk.Extent2D, 
         .render_pass = self.render_pass,
         .attachment_count = 3,
         .p_attachments = &[_]vk.ImageView{
-            self.msaa.?.view,
-            self.depth.?.view,
+            self.msaa.view,
+            self.depth.view,
             swap_image,
         },
         .width = self.extent.width,
@@ -134,17 +134,14 @@ fn updateSize(self: *Self, gc: GraphicsContext, width: u32, height: u32) !void {
     self.extent.width = width;
     self.extent.height = height;
 
-    if (self.depth) |d| {
-        d.deinit(gc);
+    self.depth.deinit(gc);
         self.depth = try tex.DepthStencilTexture.init(
             gc,
             self.extent.width,
             self.extent.height,
             self.label,
         );
-    }
-    if (self.msaa) |m| {
-        m.deinit(gc);
+    self.msaa.deinit(gc);
         self.msaa = try tex.RenderTarget.init(
             gc,
             self.extent.width,
@@ -152,7 +149,6 @@ fn updateSize(self: *Self, gc: GraphicsContext, width: u32, height: u32) !void {
             self.format,
             self.label,
         );
-    }
 }
 
 fn createRenderPass(gc: GraphicsContext, format: vk.Format, opts: Options, label: ?[*:0]const u8) !vk.RenderPass {
