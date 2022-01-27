@@ -120,6 +120,8 @@ pub fn build(b: *Builder) void {
             const res = ResourceGenStep.init(b, "resources.zig");
             res.addShader("triangle_vert", "shaders/triangle.vert");
             res.addShader("triangle_frag", "shaders/triangle.frag");
+            res.addShader("skybox_vert", "shaders/texturecubemap/skybox.vert");
+            res.addShader("skybox_frag", "shaders/texturecubemap/skybox.frag");
             break :blk res.package;
         } else {
             break :blk resources_pkg;
