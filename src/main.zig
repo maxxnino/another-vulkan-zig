@@ -33,6 +33,9 @@ const app_name = "vulkan-zig triangle example";
 
 const UniformBufferObject = struct {
     model: Mat4,
+};
+
+const PushConstant = struct {
     view: Mat4,
     proj: Mat4,
 };
@@ -87,6 +90,14 @@ pub fn main() !void {
     defer swapchain.deinit();
 
     // ********** BasicRenderer **********
+
+    // Define the push constant range used by the pipeline layout
+    // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
+    const push_constants = [_]vk.PushConstantRange{.{
+        .stage_flags = .{ .vertex_bit = true },
+        .offset = 0,
+        .size = @sizeOf(PushConstant),
+    }};
     const vert_shader = try Shader.createFromMemory(
         gc,
         allocator,
@@ -130,6 +141,7 @@ pub fn main() !void {
         swapchain.extent,
         shader_binding,
         swapchain.surface_format.format,
+        &push_constants,
         .{},
         srcToString(@src()),
     );
@@ -217,6 +229,8 @@ pub fn main() !void {
         gc,
         renderer.render_pass,
         skybox_binding,
+        &push_constants,
+
         .{},
         "skybox" ++ srcToString(@src()),
     );
@@ -239,8 +253,6 @@ pub fn main() !void {
         }, srcToString(@src()));
         try ubo.update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
-            .view = camera.getViewMatrix(),
-            .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
         }});
     }
     defer for (ubo_buffers) |ubo| {
@@ -313,9 +325,11 @@ pub fn main() !void {
         camera.moveCamera(window, dt);
         try ubo_buffers[swapchain.image_index].update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
+        }});
+        const push_constant = PushConstant{
             .view = camera.getViewMatrix(),
             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
-        }});
+        };
         const cmdbuf = draw_pool.createCommandBuffer();
 
         try buildCommandBuffers(
@@ -332,6 +346,7 @@ pub fn main() !void {
             cube,
             skybox_pipeline,
             skybox_des,
+            push_constant,
         );
 
         const state = swapchain.present(cmdbuf, &draw_pool) catch |err| switch (err) {
@@ -417,6 +432,7 @@ fn buildCommandBuffers(
     cube: Model,
     skybox: Pipeline,
     skybox_des: []vk.DescriptorSet,
+    push_constant: PushConstant,
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
@@ -432,6 +448,14 @@ fn buildCommandBuffers(
         @ptrCast([*]const vk.DescriptorSet, &sets[i]),
         0,
         undefined,
+    );
+    gc.vkd.cmdPushConstants(
+        cmdbuf,
+        renderer.pipeline.pipeline_layout,
+        .{ .vertex_bit = true },
+        0,
+        @sizeOf(PushConstant),
+        @ptrCast(*const anyopaque, &push_constant),
     );
     viking_room.draw(gc, cmdbuf, meshs);
 

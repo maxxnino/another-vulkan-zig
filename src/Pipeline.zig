@@ -18,6 +18,7 @@ pub fn createSkyboxPipeline(
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
     shader_binding: ShaderBinding,
+    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
     label: ?[*:0]const u8,
 ) !Self {
@@ -28,8 +29,8 @@ pub fn createSkyboxPipeline(
         .flags = .{},
         .set_layout_count = 1,
         .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.descriptor_set_layout),
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = undefined,
+        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
+        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
     }, label);
 
     // create Pipeline
@@ -141,6 +142,7 @@ pub fn createBasicPipeline(
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
     shader_binding: ShaderBinding,
+    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
     label: ?[*:0]const u8,
 ) !Self {
@@ -151,8 +153,8 @@ pub fn createBasicPipeline(
         .flags = .{},
         .set_layout_count = 1,
         .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.descriptor_set_layout),
-        .push_constant_range_count = 0,
-        .p_push_constant_ranges = undefined,
+        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
+        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
     }, label);
 
     // create Pipeline

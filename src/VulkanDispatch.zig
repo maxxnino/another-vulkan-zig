@@ -101,17 +101,18 @@ const device_command = [_]vk.DeviceCommand{
     .cmdSetViewport,
     .cmdDrawIndexed,
     .cmdBindPipeline,
+    .cmdPushConstants,
     .cmdEndRenderPass,
     .cmdBeginRenderPass,
     .queueSubmit2KHR,
     .cmdSetEvent2KHR,
     .cmdResetEvent2KHR,
     .cmdWaitEvents2KHR,
-    .cmdPipelineBarrier2KHR,
     .cmdBindIndexBuffer,
     .cmdCopyBufferToImage,
     .cmdBindVertexBuffers,
     .cmdBindDescriptorSets,
+    .cmdPipelineBarrier2KHR,
 } ++ device_vma ++ if (enable_safety) device_debug else [_]vk.DeviceCommand{};
 pub const DeviceDispatch = vk.DeviceWrapper(&device_command);
 

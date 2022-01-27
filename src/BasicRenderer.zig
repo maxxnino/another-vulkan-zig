@@ -21,6 +21,7 @@ pub fn init(
     extent: vk.Extent2D,
     shader_binding: ShaderBinding,
     format: vk.Format,
+    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
     label: ?[*:0]const u8,
 ) !Self {
@@ -35,6 +36,7 @@ pub fn init(
         gc,
         renderer.render_pass,
         shader_binding,
+        push_constants,
         opts,
         label,
     );
