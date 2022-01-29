@@ -33,11 +33,12 @@ const app_name = "vulkan-zig triangle example";
 
 const UniformBufferObject = struct {
     model: Mat4,
+    view: Mat4,
+    proj: Mat4,
 };
 
 const PushConstant = struct {
-    view: Mat4,
-    proj: Mat4,
+    texture_id: u32,
 };
 
 const Gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = false });
@@ -94,7 +95,7 @@ pub fn main() !void {
     // Define the push constant range used by the pipeline layout
     // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
     const push_constants = [_]vk.PushConstantRange{.{
-        .stage_flags = .{ .vertex_bit = true },
+        .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstant),
     }};
@@ -160,23 +161,39 @@ pub fn main() !void {
         .memory_flags = .{},
     }, srcToString(@src()));
     defer vertex_buffer.deinit(gc);
-
-    const texture = try Texture.loadFromFile(
-        gc,
-        .texture,
-        "assets/viking_room.png",
-        .{ .anisotropy = true, .mip_map = true },
-    );
-    defer texture.deinit(gc);
+    const textures = [_]Texture{
+        try Texture.loadFromMemory(gc, .texture, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
+        try Texture.loadFromFile(
+            gc,
+            .texture,
+            "assets/viking_room.png",
+            .{ .anisotropy = true, .mip_map = true },
+        ),
+    };
+    defer for (textures) |texture| {
+        texture.deinit(gc);
+    };
 
     // ================= Skybox ===================
-    const skybox_texture = try Texture.loadFromFile(
-        gc,
-        .cube_map,
-        "assets/cube_map.png",
-        .{ .anisotropy = true, .mip_map = true },
-    );
-    defer skybox_texture.deinit(gc);
+    const skybox_textures = [_]Texture{
+        try Texture.loadFromMemory(gc, .cube_map, &[_]u8{
+            50, 50, 50, 255,
+            50, 50, 50, 255,
+            50, 50, 50, 255,
+            50, 50, 50, 255,
+            50, 50, 50, 255,
+            50, 50, 50, 255,
+        }, 6, 1, 4, .{}, "default skybox"),
+        try Texture.loadFromFile(
+            gc,
+            .cube_map,
+            "assets/cube_map.png",
+            .{ .anisotropy = true, .mip_map = true },
+        ),
+    };
+    defer for (skybox_textures) |texture| {
+        texture.deinit(gc);
+    };
     const skybox_vert = try Shader.createFromMemory(
         gc,
         allocator,
@@ -253,6 +270,8 @@ pub fn main() !void {
         }, srcToString(@src()));
         try ubo.update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
+            .view = camera.getViewMatrix(),
+            .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
         }});
     }
     defer for (ubo_buffers) |ubo| {
@@ -273,27 +292,28 @@ pub fn main() !void {
     try uploadData(u32, gc, index_buffer, indices.items);
 
     // Desciptor Set
-    const pool_size = frame_size * 2;
+    // const pool_size = frame_size;
     const pool_sizes = [_]vk.DescriptorPoolSize{ .{
         .@"type" = .uniform_buffer,
-        .descriptor_count = pool_size,
+        .descriptor_count = frame_size,
     }, .{
         .@"type" = .combined_image_sampler,
-        .descriptor_count = pool_size,
+        .descriptor_count = @truncate(u32, textures.len),
     } };
     const descriptor_pool = try gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
-        .max_sets = pool_size,
+        .max_sets = frame_size + 1,
         .pool_size_count = @truncate(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
     }, srcToString(@src()));
+
     defer gc.destroy(descriptor_pool);
     var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
     for (des_layouts) |*l| {
         l.* = renderer.pipeline.descriptor_set_layout;
     }
     defer allocator.free(des_layouts);
-    const dsai = vk.DescriptorSetAllocateInfo{
+    var dsai = vk.DescriptorSetAllocateInfo{
         .descriptor_pool = descriptor_pool,
         .descriptor_set_count = frame_size,
         .p_set_layouts = des_layouts.ptr,
@@ -302,16 +322,51 @@ pub fn main() !void {
     defer allocator.free(des_sets);
     try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, des_sets.ptr);
     for (des_sets) |ds, i| {
-        updateDescriptorSet(gc, ds, ubo_buffers[i], texture);
+        updateDescriptorSet(gc, ds, ubo_buffers[i]);
+    }
+
+    const des_variable_sets = vk.DescriptorSetVariableDescriptorCountAllocateInfo{
+        .descriptor_set_count = 1,
+        .p_descriptor_counts = &[_]u32{2},
+    };
+    for (des_layouts) |*l| {
+        l.* = renderer.pipeline.bindless_set_layout;
+    }
+    dsai.descriptor_set_count = 1;
+    dsai.p_next = @ptrCast(*const anyopaque, &des_variable_sets);
+    var bindless_sets: vk.DescriptorSet = undefined;
+    try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &bindless_sets));
+    {
+        const wds = [_]vk.WriteDescriptorSet{
+            .{
+                .dst_set = bindless_sets,
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 2,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo{ .{
+                    .sampler = textures[0].smapler,
+                    .image_view = textures[0].view,
+                    .image_layout = textures[0].image.layout,
+                }, .{
+                    .sampler = textures[1].smapler,
+                    .image_view = textures[1].view,
+                    .image_layout = textures[1].image.layout,
+                } },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        };
+        gc.vkd.updateDescriptorSets(gc.dev, @truncate(u32, wds.len), @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
     }
 
     // =====skybox descriptor ====
-    var skybox_des = try allocator.alloc(vk.DescriptorSet, frame_size);
-    defer allocator.free(skybox_des);
-    try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, skybox_des.ptr);
-    for (skybox_des) |ds, i| {
-        updateDescriptorSet(gc, ds, ubo_buffers[i], skybox_texture);
-    }
+    // var skybox_des = try allocator.alloc(vk.DescriptorSet, frame_size);
+    // defer allocator.free(skybox_des);
+    // try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, skybox_des.ptr);
+    // for (skybox_des) |ds, i| {
+    //     updateDescriptorSet(gc, ds, ubo_buffers[i], skybox_textures);
+    // }
     //End descriptor set
 
     var draw_pool = try DrawPool.init(gc, srcToString(@src()));
@@ -319,17 +374,27 @@ pub fn main() !void {
 
     //Timer
     var update_timer = try std.time.Timer.start();
+    var press = false;
 
+    var push_constant = PushConstant{ .texture_id = 0 };
     while (!window.shouldClose()) {
         const dt = @intToFloat(f32, update_timer.lap()) / @intToFloat(f32, std.time.ns_per_s);
         camera.moveCamera(window, dt);
         try ubo_buffers[swapchain.image_index].update(UniformBufferObject, gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
-        }});
-        const push_constant = PushConstant{
             .view = camera.getViewMatrix(),
             .proj = camera.getProjMatrix(swapchain.extent.width, swapchain.extent.height),
-        };
+        }});
+        if (window.getKey(.f) == .press) {
+            press = true;
+        }
+
+        if (window.getKey(.f) == .release) {
+            if (press) {
+                push_constant.texture_id = (push_constant.texture_id + 1) % @truncate(u32, textures.len);
+                press = false;
+            }
+        }
         const cmdbuf = draw_pool.createCommandBuffer();
 
         try buildCommandBuffers(
@@ -341,11 +406,12 @@ pub fn main() !void {
             vertex_buffer.buffer,
             index_buffer.buffer,
             des_sets,
+            bindless_sets,
             meshs.items,
             viking_room,
             cube,
-            skybox_pipeline,
-            skybox_des,
+            // skybox_pipeline,
+            // skybox_des,
             push_constant,
         );
 
@@ -384,7 +450,7 @@ pub fn uploadData(comptime T: type, gc: GraphicsContext, buffer: Buffer, data: [
     try stage_buffer.copyToBuffer(buffer, gc);
 }
 
-fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer, texture: Texture) void {
+fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer) void {
     const wds = [_]vk.WriteDescriptorSet{
         .{
             .dst_set = descriptor_set,
@@ -400,20 +466,24 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
             }},
             .p_texel_buffer_view = undefined,
         },
-        .{
-            .dst_set = descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .combined_image_sampler,
-            .p_image_info = &[_]vk.DescriptorImageInfo{.{
-                .sampler = texture.smapler,
-                .image_view = texture.view,
-                .image_layout = texture.image.layout,
-            }},
-            .p_buffer_info = undefined,
-            .p_texel_buffer_view = undefined,
-        },
+        // .{
+        //     .dst_set = descriptor_set,
+        //     .dst_binding = 1,
+        //     .dst_array_element = 0,
+        //     .descriptor_count = 2,
+        //     .descriptor_type = .combined_image_sampler,
+        //     .p_image_info = &[_]vk.DescriptorImageInfo{ .{
+        //         .sampler = textures[0].smapler,
+        //         .image_view = textures[0].view,
+        //         .image_layout = textures[0].image.layout,
+        //     }, .{
+        //         .sampler = textures[1].smapler,
+        //         .image_view = textures[1].view,
+        //         .image_layout = textures[1].image.layout,
+        //     } },
+        //     .p_buffer_info = undefined,
+        //     .p_texel_buffer_view = undefined,
+        // },
     };
     gc.vkd.updateDescriptorSets(gc.dev, @truncate(u32, wds.len), @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
 }
@@ -427,11 +497,12 @@ fn buildCommandBuffers(
     vertex_buffer: vk.Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
+    bindless: vk.DescriptorSet,
     meshs: []const Mesh,
     viking_room: Model,
     cube: Model,
-    skybox: Pipeline,
-    skybox_des: []vk.DescriptorSet,
+    // skybox: Pipeline,
+    // skybox_des: []vk.DescriptorSet,
     push_constant: PushConstant,
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
@@ -444,32 +515,35 @@ fn buildCommandBuffers(
         .graphics,
         renderer.pipeline.pipeline_layout,
         0,
-        1,
-        @ptrCast([*]const vk.DescriptorSet, &sets[i]),
+        2,
+        &[_]vk.DescriptorSet{
+            sets[i],
+            bindless,
+        },
         0,
         undefined,
     );
     gc.vkd.cmdPushConstants(
         cmdbuf,
         renderer.pipeline.pipeline_layout,
-        .{ .vertex_bit = true },
+        .{ .fragment_bit = true },
         0,
         @sizeOf(PushConstant),
         @ptrCast(*const anyopaque, &push_constant),
     );
     viking_room.draw(gc, cmdbuf, meshs);
 
-    skybox.bind(gc, cmdbuf);
-    gc.vkd.cmdBindDescriptorSets(
-        cmdbuf,
-        .graphics,
-        renderer.pipeline.pipeline_layout,
-        0,
-        1,
-        @ptrCast([*]const vk.DescriptorSet, &skybox_des[i]),
-        0,
-        undefined,
-    );
+    // skybox.bind(gc, cmdbuf);
+    // gc.vkd.cmdBindDescriptorSets(
+    //     cmdbuf,
+    //     .graphics,
+    //     renderer.pipeline.pipeline_layout,
+    //     0,
+    //     1,
+    //     @ptrCast([*]const vk.DescriptorSet, &skybox_des[i]),
+    //     0,
+    //     undefined,
+    // );
     cube.draw(gc, cmdbuf, meshs);
     try renderer.endFrame(gc, cmdbuf);
 }

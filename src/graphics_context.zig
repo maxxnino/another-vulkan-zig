@@ -173,7 +173,6 @@ pub const GraphicsContext = struct {
             .queue_family_index = self.graphics_queue.family,
         }, srcToString(@src()));
 
-
         return self;
     }
 
@@ -341,11 +340,35 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
     // enable khr_synchronization_2 feature
     const khr_synchronization_2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
         .synchronization_2 = vk.TRUE,
+        // .p_next = null,
+    };
+    const descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures{
+        .p_next = @ptrCast(*const anyopaque, &khr_synchronization_2),
+        // .shader_input_attachment_array_dynamic_indexing= Bool32 = FALSE,
+        // .shader_uniform_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,
+        // .shader_storage_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,
+        // .shader_uniform_buffer_array_non_uniform_indexing= Bool32 = FALSE,
+        .shader_sampled_image_array_non_uniform_indexing = vk.TRUE,
+        // .shader_storage_buffer_array_non_uniform_indexing= Bool32 = FALSE,
+        // .shader_storage_image_array_non_uniform_indexing= Bool32 = FALSE,
+        // .shader_input_attachment_array_non_uniform_indexing= Bool32 = FALSE,
+        // .shader_uniform_texel_buffer_array_non_uniform_indexing= Bool32 = FALSE,
+        // .shader_storage_texel_buffer_array_non_uniform_indexing= Bool32 = FALSE,
+        // .descriptor_binding_uniform_buffer_update_after_bind= Bool32 = FALSE,
+        // .descriptor_binding_sampled_image_update_after_bind= Bool32 = FALSE,
+        // .descriptor_binding_storage_image_update_after_bind= Bool32 = FALSE,
+        // .descriptor_binding_storage_buffer_update_after_bind= Bool32 = FALSE,
+        // .descriptor_binding_uniform_texel_buffer_update_after_bind= Bool32 = FALSE,
+        // .descriptor_binding_storage_texel_buffer_update_after_bind= Bool32 = FALSE,
+        .descriptor_binding_update_unused_while_pending = vk.TRUE,
+        .descriptor_binding_partially_bound = vk.TRUE,
+        .descriptor_binding_variable_descriptor_count = vk.TRUE,
+        .runtime_descriptor_array = vk.TRUE,
     };
 
     return try vki.createDevice(candidate.pdev, &.{
         .flags = .{},
-        .p_next = @ptrCast(*const anyopaque, &khr_synchronization_2),
+        .p_next = @ptrCast(*const anyopaque, &descriptor_indexing),
         .queue_create_info_count = queue_count,
         .p_queue_create_infos = &qci,
         .enabled_layer_count = 0,

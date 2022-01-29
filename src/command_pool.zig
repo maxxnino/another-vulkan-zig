@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 
-pub const DrawPool = CommandPool(2, 3);
+pub const DrawPool = CommandPool(2, 6);
 
 const State = enum {
     free,
@@ -46,7 +46,6 @@ fn SmallPool(comptime size: u4) type {
         }
 
         pub fn deinit(self: Self, gc: GraphicsContext) void {
-            // gc.vkd.freeCommandBuffers(gc.dev, gc.pool, size, &self.command_buffers);
             gc.destroy(self.pool);
         }
 
@@ -111,7 +110,6 @@ pub fn CommandPool(comptime total_pool: u4, comptime pool_size: u4) type {
         }
 
         pub fn deinit(self: Self, gc: GraphicsContext) void {
-            // gc.vkd.freeCommandBuffers(gc.dev, gc.pool, size, &self.command_buffers);
             for (self.pools) |p| {
                 p.deinit(gc);
             }

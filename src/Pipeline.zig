@@ -7,12 +7,54 @@ const Self = @This();
 
 pipeline: vk.Pipeline,
 descriptor_set_layout: vk.DescriptorSetLayout,
+bindless_set_layout: vk.DescriptorSetLayout,
 pipeline_layout: vk.PipelineLayout,
 
 pub const Options = struct {
     msaa: bool = true,
     ssaa: bool = true,
 };
+
+fn createLayout(
+    self: *Self,
+    gc: GraphicsContext,
+    shader_binding: ShaderBinding,
+    push_constants: ?[]const vk.PushConstantRange,
+    label: ?[*:0]const u8,
+) !void {
+    self.bindless_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
+        .flags = .{},
+        .binding_count = 1,
+        .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
+            .binding = 0,
+            .descriptor_type = .combined_image_sampler,
+            .descriptor_count = 2,
+            .stage_flags = .{ .fragment_bit = true },
+            .p_immutable_samplers = null,
+        }},
+        .p_next = @ptrCast(*const anyopaque, &vk.DescriptorSetLayoutBindingFlagsCreateInfo{
+            .binding_count = 1,
+            .p_binding_flags = &[_]vk.DescriptorBindingFlags{.{
+                // .update_after_bind_bit = true,
+                .update_unused_while_pending_bit = true,
+                .partially_bound_bit = true,
+                .variable_descriptor_count_bit = true,
+            }},
+        }),
+    }, label);
+
+    self.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
+    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
+        .flags = .{},
+        .set_layout_count = 2,
+        .p_set_layouts = &[_]vk.DescriptorSetLayout{
+            self.descriptor_set_layout,
+            self.bindless_set_layout,
+        },
+        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
+        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
+    }, label);
+}
 
 pub fn createSkyboxPipeline(
     gc: GraphicsContext,
@@ -24,18 +66,9 @@ pub fn createSkyboxPipeline(
 ) !Self {
     var self: Self = undefined;
 
-    self.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
-    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
-        .flags = .{},
-        .set_layout_count = 1,
-        .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.descriptor_set_layout),
-        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
-        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
-    }, label);
+    try self.createLayout(gc, shader_binding, push_constants, label);
 
-    // create Pipeline
     const shader_stages = shader_binding.getPipelineShaderStageCreateInfo();
-
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
         .topology = .triangle_list,
@@ -148,16 +181,7 @@ pub fn createBasicPipeline(
 ) !Self {
     var self: Self = undefined;
 
-    self.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
-    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
-        .flags = .{},
-        .set_layout_count = 1,
-        .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.descriptor_set_layout),
-        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
-        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
-    }, label);
-
-    // create Pipeline
+    try self.createLayout(gc, shader_binding, push_constants, label);
     const shader_stages = shader_binding.getPipelineShaderStageCreateInfo();
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
@@ -269,6 +293,7 @@ pub fn bind(self: Self, gc: GraphicsContext, command_buffer: vk.CommandBuffer) v
 
 pub fn deinit(self: Self, gc: GraphicsContext) void {
     gc.destroy(self.descriptor_set_layout);
+    gc.destroy(self.bindless_set_layout);
     gc.destroy(self.pipeline_layout);
     gc.destroy(self.pipeline);
 }

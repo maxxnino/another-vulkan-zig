@@ -65,13 +65,6 @@ pub fn StbImageType(comptime T: type) type {
             return self.width * self.channels;
         }
 
-        pub fn totalByte(self: Image) u32 {
-            return self.width * self.height * self.channels;
-        }
-
-        pub fn byteFromSize(self: Image, size: u32) u32 {
-            return self.channels * size;
-        }
     };
 }
 pub const Channel = enum(i32) {

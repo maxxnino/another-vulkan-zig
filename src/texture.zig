@@ -23,25 +23,31 @@ pub const Texture = struct {
     smapler: vk.Sampler,
     config: Config,
 
-    pub fn loadFromFile(gc: GraphicsContext, comptime @"type": TextureType, filename: [*:0]const u8, config: Config) !Texture {
+    pub fn loadFromMemory(
+        gc: GraphicsContext,
+        comptime @"type": TextureType,
+        buffer: []const u8,
+        in_width: u32,
+        in_height: u32,
+        channels: u32,
+        config: Config,
+        label: ?[*:0]const u8,
+    ) !Texture {
         var texture: Texture = undefined;
         texture.config = config;
-        const data = try StbImage.loadFromFile(filename, .rgb_alpha);
-        defer data.free();
-
         const stage_buffer = try Buffer.init(gc, .{
-            .size = data.totalByte(),
+            .size = buffer.len,
             .buffer_usage = .{ .transfer_src_bit = true },
             .memory_usage = .cpu_to_gpu,
             .memory_flags = .{},
-        }, filename);
+        }, label);
         defer stage_buffer.deinit(gc);
-        try stage_buffer.update(u8, gc, data.pixels);
+        try stage_buffer.update(u8, gc, buffer);
         const width = switch (@"type") {
-            .texture => data.width,
-            .cube_map => data.width / 6,
+            .texture => in_width,
+            .cube_map => in_width / 6,
         };
-        const height = data.height;
+        const height = in_height;
 
         const mip_levels = if (config.mip_map) calcMipLevel(width, height) else 1;
         texture.image = try Image.init(gc, .{
@@ -64,7 +70,7 @@ pub const Texture = struct {
             },
             .memory_usage = .gpu_only,
             .memory_flags = .{},
-        }, filename);
+        }, label);
         var subresource_range = vk.ImageSubresourceRange{
             .aspect_mask = .{ .color_bit = true },
             .base_mip_level = 0,
@@ -92,12 +98,12 @@ pub const Texture = struct {
         const bic = blk: {
             if (@"type" == .cube_map) {
                 var temp: [6]vk.BufferImageCopy = undefined;
-                const base_offset = data.byteFromSize(width);
+                const base_offset = channels * width;
                 for (temp) |*t, index| {
                     const i = @truncate(u32, index);
                     t.* = vk.BufferImageCopy{
                         .buffer_offset = base_offset * i,
-                        .buffer_row_length = data.width,
+                        .buffer_row_length = in_width,
                         .buffer_image_height = height,
                         .image_subresource = .{
                             .aspect_mask = .{ .color_bit = true },
@@ -191,7 +197,7 @@ pub const Texture = struct {
                 .base_array_layer = 0,
                 .layer_count = if (@"type" == .cube_map) 6 else 1,
             },
-        }, filename);
+        }, label);
 
         texture.smapler = try gc.create(vk.SamplerCreateInfo{
             .flags = .{},
@@ -210,8 +216,14 @@ pub const Texture = struct {
             .max_lod = if (config.mip_map) @intToFloat(f32, mip_levels) else 0,
             .border_color = .int_opaque_black,
             .unnormalized_coordinates = vk.FALSE,
-        }, filename);
+        }, label);
         return texture;
+    }
+
+    pub fn loadFromFile(gc: GraphicsContext, comptime @"type": TextureType, filename: [*:0]const u8, config: Config) !Texture {
+        const image = try StbImage.loadFromFile(filename, .rgb_alpha);
+        defer image.free();
+        return loadFromMemory(gc, @"type", image.pixels, image.width, image.height, image.channels, config, filename);
     }
 
     pub fn deinit(self: Texture, gc: GraphicsContext) void {
