@@ -1,12 +1,18 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
 
-layout (binding = 1) uniform samplerCube samplerCubeMap;
+layout(push_constant) uniform PushConstant {
+    uint texture_id;
+} push;
 
-layout (location = 0) in vec3 inUVW;
+layout (location = 0) in vec3 in_uvw;
+layout (location = 0) out vec4 out_frag_color;
 
-layout (location = 0) out vec4 outFragColor;
+layout (set = 1, binding = 0) uniform samplerCube sampler_cubemaps[];
+
+
 
 void main() 
 {
-	outFragColor = texture(samplerCubeMap, inUVW);
+	out_frag_color = texture(sampler_cubemaps[nonuniformEXT(push.texture_id)], in_uvw);
 }
