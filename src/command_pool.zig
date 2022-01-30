@@ -82,6 +82,15 @@ fn SmallPool(comptime size: u4) type {
         pub fn isFull(self: Self) bool {
             return self.current >= size;
         }
+
+        pub fn resetAll(self: *Self, gc: GraphicsContext) !void {
+            for (self.state) |*s| {
+                s.* = .free;
+            }
+            self.total = 0;
+            self.current = 0;
+            try gc.vkd.resetCommandPool(gc.dev, self.pool, .{});
+        }
     };
 }
 
@@ -135,6 +144,13 @@ pub fn CommandPool(comptime total_pool: u4, comptime pool_size: u4) type {
                 .index = r.index,
                 .pool_index = self.current,
             };
+        }
+
+        pub fn resetAll(self: *Self, gc: GraphicsContext) !void{
+            self.current = 0;
+            for(self.pools) |*p|{
+                try p.resetAll(gc);
+            }
         }
     };
 }

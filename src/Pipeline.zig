@@ -28,7 +28,7 @@ fn createLayout(
         .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
             .binding = 0,
             .descriptor_type = .combined_image_sampler,
-            .descriptor_count = 2,
+            .descriptor_count = 64,
             .stage_flags = .{ .fragment_bit = true },
             .p_immutable_samplers = null,
         }},

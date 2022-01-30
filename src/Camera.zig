@@ -1,15 +1,8 @@
 const std = @import("std");
-const vk = @import("vulkan");
-const glfw = @import("glfw");
-const vma = @import("binding/vma.zig");
 const z = @import("zalgebra");
-const assert = std.debug.assert;
-const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
-const Buffer = @import("Buffer.zig");
-const Allocator = std.mem.Allocator;
+const Window = @import("Window.zig");
 const Mat4 = z.Mat4;
 const Vec3 = z.Vec3;
-const Vec2 = z.Vec2;
 const Camera = @This();
 
 pitch: f32,
@@ -38,14 +31,14 @@ pub fn getProjMatrix(self: Camera, width: u32, height: u32) Mat4 {
     return proj;
 }
 
-pub fn moveCamera(self: *Camera, window: glfw.Window, dt: f32) void {
+pub fn moveCamera(self: *Camera, window: Window, dt: f32) void {
     var x_dir: f32 = 0;
     var y_dir: f32 = 0;
 
-    if (window.getKey(.j) == .press) y_dir += dt;
-    if (window.getKey(.k) == .press) y_dir -= dt;
-    if (window.getKey(.h) == .press) x_dir += dt;
-    if (window.getKey(.l) == .press) x_dir -= dt;
+    if (window.isKey(.j, .press)) y_dir += dt;
+    if (window.isKey(.k, .press)) y_dir -= dt;
+    if (window.isKey(.h, .press)) x_dir += dt;
+    if (window.isKey(.l, .press)) x_dir -= dt;
 
     // limit pitch values between about +/- 85ish degrees
     self.yaw += x_dir * rotate_speed;
@@ -54,12 +47,12 @@ pub fn moveCamera(self: *Camera, window: glfw.Window, dt: f32) void {
     self.yaw = std.math.mod(f32, self.yaw, 360) catch unreachable;
 
     var move_dir = Vec3.zero();
-    if (window.getKey(.w) == .press) move_dir.z += dt;
-    if (window.getKey(.s) == .press) move_dir.z -= dt;
-    if (window.getKey(.a) == .press) move_dir.x += dt;
-    if (window.getKey(.d) == .press) move_dir.x -= dt;
-    if (window.getKey(.space) == .press) move_dir.y += dt;
-    if (window.getKey(.left_control) == .press) move_dir.y -= dt;
+    if (window.isKey(.w, .press)) move_dir.z += dt;
+    if (window.isKey(.s, .press)) move_dir.z -= dt;
+    if (window.isKey(.a, .press)) move_dir.x += dt;
+    if (window.isKey(.d, .press)) move_dir.x -= dt;
+    if (window.isKey(.space, .press)) move_dir.y += dt;
+    if (window.isKey(.left_control, .press)) move_dir.y -= dt;
 
     self.quat = z.Quat.fromEulerAngle(Vec3.new(self.pitch, self.yaw, 0));
     const translation = self.quat.rotateVec(move_dir.scale(move_speed));
