@@ -39,14 +39,12 @@ const UniformBufferObject = struct {
 const PushConstant = struct {
     texture_id: u32,
 };
-const Vertex = vertex.Vertex;
-const VertexArray = std.MultiArrayList(Vertex);
 
 allocator: std.mem.Allocator,
 window: Window,
 timer: std.time.Timer,
 indices: std.ArrayList(u32),
-vertices: VertexArray,
+vertices: vertex.VertexArray,
 meshs: std.ArrayList(Mesh),
 gc: GraphicsContext,
 swapchain: Swapchain,
@@ -73,7 +71,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ********** load Model **********
     self.indices = std.ArrayList(u32).init(allocator);
-    self.vertices = VertexArray{};
+    self.vertices = vertex.VertexArray{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
     var arena = std.heap.ArenaAllocator.init(allocator);
     appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/untitled.gltf");
@@ -150,7 +148,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     //*********************************
 
     const frame_size = @truncate(u32, self.framebuffers.len);
-    self.vertex_buffer = try vertex.VertexBuffer.init(self.gc, self.vertices.len, srcToString(@src()));
     self.textures = [_]Texture{
         try Texture.loadFromMemory(self.gc, .texture, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadFromFile(
@@ -254,10 +251,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, srcToString(@src()));
 
     // uploadVertices
-    const slice = self.vertices.slice();
-    try self.vertex_buffer.get(.position).upload(Vec3, self.gc, slice.items(.position));
-    try self.vertex_buffer.get(.tex_coord).upload(Vec2, self.gc, slice.items(.tex_coord));
-    try self.vertex_buffer.get(.normal).upload(Vec3, self.gc, slice.items(.normal));
+    self.vertex_buffer = try vertex.VertexBuffer.init(self.gc, self.vertices.slice(), srcToString(@src()));
     //Upload indices
     try self.index_buffer.upload(u32, self.gc, self.indices.items);
 
@@ -497,7 +491,7 @@ fn buildCommandBuffers(
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
-    vertex_buffer.bind(gc, cmdbuf, &vertex.VertexBuffer.zero_offsets);
+    vertex_buffer.bind(gc, cmdbuf, vertex.VertexBuffer.zero_offsets);
     gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
     gc.vkd.cmdBindDescriptorSets(
         cmdbuf,
@@ -566,7 +560,7 @@ pub fn appendGltfModel(
     base_allocator: Allocator,
     arena: Allocator,
     all_meshes: *std.ArrayList(Mesh),
-    all_vertices: *VertexArray,
+    all_vertices: *vertex.VertexArray,
     all_indices: *std.ArrayList(u32),
     path: [:0]const u8,
 ) void {
