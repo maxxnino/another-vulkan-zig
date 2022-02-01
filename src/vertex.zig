@@ -65,7 +65,7 @@ pub const VertexBuffer = struct {
                 .memory_flags = .{},
             }, label);
 
-            try self.buffers[field.value].upload(Type(component), gc, slice.items(component));
+            try self.buffers[field.value].upload(FieldType(component), gc, slice.items(component));
 
             self.bind_buffer[i] = self.buffers[i].buffer;
         }
@@ -84,20 +84,19 @@ pub const VertexBuffer = struct {
     }
 };
 
-fn toFormat(component: Component) vk.Format {
-    return switch (component) {
-        .position => .r32g32b32_sfloat,
-        .tex_coord => .r32g32_sfloat,
-        .normal => .r32g32b32_sfloat,
-        // .tangent => .r32g32b32a32_sfloat,
-        // .color => .r32g32b32_sfloat,
-    };
+fn toFormat(comptime component: Component) vk.Format {
+    const T = FieldType(component);
+    if (T == Vec3) return .r32g32b32_sfloat;
+    if (T == Vec2) return .r32g32_sfloat;
+    if (T == Vec4) return .r32g32b32a32_sfloat;
+
+    @compileError("Not support field: " ++ @tagName(component) ++ " with type: " ++ @typeName(T));
 }
 
 fn toStride(comptime component: Component) u32 {
-    return @sizeOf(Type(component));
+    return @sizeOf(FieldType(component));
 }
 
-fn Type(comptime component: Component) type {
+fn FieldType(comptime component: Component) type {
     return std.meta.fieldInfo(Vertex, component).field_type;
 }
