@@ -8,6 +8,7 @@ const Self = @This();
 pipeline: vk.Pipeline,
 descriptor_set_layout: vk.DescriptorSetLayout,
 bindless_set_layout: vk.DescriptorSetLayout,
+immutable_sampler_set_layout: vk.DescriptorSetLayout,
 pipeline_layout: vk.PipelineLayout,
 
 pub const Options = struct {
@@ -27,7 +28,7 @@ fn createLayout(
         .binding_count = 1,
         .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
             .binding = 0,
-            .descriptor_type = .combined_image_sampler,
+            .descriptor_type = .sampled_image,
             .descriptor_count = 64,
             .stage_flags = .{ .fragment_bit = true },
             .p_immutable_samplers = null,
@@ -43,12 +44,25 @@ fn createLayout(
         }),
     }, label);
 
+    self.immutable_sampler_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
+        .flags = .{},
+        .binding_count = 1,
+        .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
+            .binding = 0,
+            .descriptor_type = .sampler,
+            .descriptor_count = 1,
+            .stage_flags = .{ .fragment_bit = true },
+            .p_immutable_samplers = &[_]vk.Sampler{gc.immutable_samplers},
+        }},
+    }, label);
+
     self.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
     self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
         .flags = .{},
-        .set_layout_count = 2,
+        .set_layout_count = 3,
         .p_set_layouts = &[_]vk.DescriptorSetLayout{
             self.bindless_set_layout,
+            self.immutable_sampler_set_layout,
             self.descriptor_set_layout,
         },
         .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
@@ -307,6 +321,7 @@ pub fn pushConstant(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, s
 pub fn deinit(self: Self, gc: GraphicsContext) void {
     gc.destroy(self.descriptor_set_layout);
     gc.destroy(self.bindless_set_layout);
+    gc.destroy(self.immutable_sampler_set_layout);
     gc.destroy(self.pipeline_layout);
     gc.destroy(self.pipeline);
 }

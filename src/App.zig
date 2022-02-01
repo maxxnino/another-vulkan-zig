@@ -61,6 +61,7 @@ index_buffer: Buffer,
 descriptor_pool: vk.DescriptorPool,
 des_sets: []vk.DescriptorSet,
 bindless_sets: vk.DescriptorSet,
+immutable_sampler_set: vk.DescriptorSet,
 draw_pool: DrawPool,
 cube: Model,
 viking_room: Model,
@@ -141,7 +142,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.swapchain.surface_format.format,
         &push_constants,
         .{},
-        srcToString(@src()),
+        "basic pipeline " ++ srcToString(@src()),
     );
 
     self.framebuffers = try createFramebuffers(self.gc, allocator, self.swapchain, &self.renderer, srcToString(@src()));
@@ -218,7 +219,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         &push_constants,
 
         .{},
-        "skybox" ++ srcToString(@src()),
+        "skybox " ++ srcToString(@src()),
     );
     // ============================================
     self.camera = Camera{
@@ -257,16 +258,23 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // Desciptor Set
     // const pool_size = frame_size;
-    const pool_sizes = [_]vk.DescriptorPoolSize{ .{
-        .@"type" = .uniform_buffer,
-        .descriptor_count = frame_size,
-    }, .{
-        .@"type" = .combined_image_sampler,
-        .descriptor_count = 64,
-    } };
+    const pool_sizes = [_]vk.DescriptorPoolSize{
+        .{
+            .@"type" = .sampled_image,
+            .descriptor_count = 64,
+        },
+        .{
+            .@"type" = .sampler,
+            .descriptor_count = 1,
+        },
+        .{
+            .@"type" = .uniform_buffer,
+            .descriptor_count = frame_size,
+        },
+    };
     self.descriptor_pool = try self.gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
-        .max_sets = frame_size + 1,
+        .max_sets = frame_size + 2,
         .pool_size_count = @truncate(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
     }, srcToString(@src()));
@@ -281,41 +289,49 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .descriptor_set_count = frame_size,
         .p_set_layouts = des_layouts.ptr,
     };
+
+    //ubo sets
     self.des_sets = try allocator.alloc(vk.DescriptorSet, frame_size);
     try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, self.des_sets.ptr);
     for (self.des_sets) |ds, i| {
         updateDescriptorSet(self.gc, ds, self.ubo_buffers[i]);
     }
 
+    // immutable_sampler_set
+    dsai.descriptor_set_count = 1;
+    des_layouts[0] = self.renderer.pipeline.immutable_sampler_set_layout;
+    try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.immutable_sampler_set));
+    try self.gc.markHandle(self.immutable_sampler_set, .descriptor_set, "immutable_sampler_set " ++ srcToString(@src()));
+
+    // bindless_sets
     const des_variable_sets = vk.DescriptorSetVariableDescriptorCountAllocateInfo{
         .descriptor_set_count = 1,
         .p_descriptor_counts = &[_]u32{64},
     };
-    for (des_layouts) |*l| {
-        l.* = self.renderer.pipeline.bindless_set_layout;
-    }
+    des_layouts[0] = self.renderer.pipeline.bindless_set_layout;
     dsai.descriptor_set_count = 1;
     dsai.p_next = @ptrCast(*const anyopaque, &des_variable_sets);
     try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.bindless_sets));
+    try self.gc.markHandle(self.bindless_sets, .descriptor_set, "bindless " ++ srcToString(@src()));
     {
         const dii = [_]vk.DescriptorImageInfo{ .{
-            .sampler = self.textures[0].smapler,
+            .sampler = undefined,
             .image_view = self.textures[0].view,
             .image_layout = self.textures[0].image.layout,
         }, .{
-            .sampler = self.textures[1].smapler,
+            .sampler = undefined,
             .image_view = self.textures[1].view,
             .image_layout = self.textures[1].image.layout,
         }, .{
-            .sampler = self.skybox_textures[0].smapler,
+            .sampler = undefined,
             .image_view = self.skybox_textures[0].view,
             .image_layout = self.skybox_textures[0].image.layout,
         }, .{
-            .sampler = self.skybox_textures[1].smapler,
+            .sampler = undefined,
             .image_view = self.skybox_textures[1].view,
             .image_layout = self.skybox_textures[1].image.layout,
         }, .{
-            .sampler = self.skybox_textures[2].smapler,
+            .sampler = undefined,
             .image_view = self.skybox_textures[2].view,
             .image_layout = self.skybox_textures[2].image.layout,
         } };
@@ -325,7 +341,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = @truncate(u32, dii.len),
-                .descriptor_type = .combined_image_sampler,
+                .descriptor_type = .sampled_image,
                 .p_image_info = &dii,
                 .p_buffer_info = undefined,
                 .p_texel_buffer_view = undefined,
@@ -409,6 +425,7 @@ pub fn run(self: *Self) !void {
             self.index_buffer.buffer,
             self.des_sets,
             self.bindless_sets,
+            self.immutable_sampler_set,
             self.meshs.items,
             self.viking_room,
             self.skybox_pipeline,
@@ -483,6 +500,7 @@ fn buildCommandBuffers(
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     bindless: vk.DescriptorSet,
+    immutable_sampler_set: vk.DescriptorSet,
     meshs: []const Mesh,
     viking_room: Model,
     skybox: Pipeline,
@@ -498,9 +516,10 @@ fn buildCommandBuffers(
         .graphics,
         renderer.pipeline.pipeline_layout,
         0,
-        2,
+        3,
         &[_]vk.DescriptorSet{
             bindless,
+            immutable_sampler_set,
             sets[i],
         },
         0,

@@ -20,7 +20,6 @@ pub const Texture = struct {
     };
     image: Image,
     view: vk.ImageView,
-    smapler: vk.Sampler,
     config: Config,
 
     pub fn loadFromMemory(
@@ -199,24 +198,6 @@ pub const Texture = struct {
             },
         }, label);
 
-        texture.smapler = try gc.create(vk.SamplerCreateInfo{
-            .flags = .{},
-            .mag_filter = .linear,
-            .min_filter = .linear,
-            .mipmap_mode = .linear,
-            .address_mode_u = .repeat,
-            .address_mode_v = .repeat,
-            .address_mode_w = .repeat,
-            .mip_lod_bias = 0,
-            .anisotropy_enable = if (config.anisotropy == true) vk.TRUE else vk.FALSE,
-            .max_anisotropy = if (config.anisotropy == true) gc.props.limits.max_sampler_anisotropy else undefined,
-            .compare_enable = vk.FALSE,
-            .compare_op = .always,
-            .min_lod = 0,
-            .max_lod = if (config.mip_map) @intToFloat(f32, mip_levels) else 0,
-            .border_color = .int_opaque_black,
-            .unnormalized_coordinates = vk.FALSE,
-        }, label);
         return texture;
     }
 
@@ -229,7 +210,6 @@ pub const Texture = struct {
     pub fn deinit(self: Texture, gc: GraphicsContext) void {
         self.image.deinit(gc);
         gc.destroy(self.view);
-        gc.destroy(self.smapler);
     }
 };
 

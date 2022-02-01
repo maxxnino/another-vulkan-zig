@@ -55,6 +55,8 @@ pub const GraphicsContext = struct {
     allocator: vma.Allocator,
     debug_message: if (enable_safety) vk.DebugUtilsMessengerEXT else void,
 
+    immutable_samplers: vk.Sampler,
+
     pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: glfw.Window) !GraphicsContext {
         var self: GraphicsContext = undefined;
         const vk_proc = @ptrCast(
@@ -173,10 +175,30 @@ pub const GraphicsContext = struct {
             .queue_family_index = self.graphics_queue.family,
         }, srcToString(@src()));
 
+        self.immutable_samplers = try self.create(vk.SamplerCreateInfo{
+            .flags = .{},
+            .mag_filter = .linear,
+            .min_filter = .linear,
+            .mipmap_mode = .linear,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0,
+            .anisotropy_enable = vk.TRUE,
+            .max_anisotropy = self.props.limits.max_sampler_anisotropy,
+            .compare_enable = vk.FALSE,
+            .compare_op = .always,
+            .min_lod = 0,
+            .max_lod = vk.LOD_CLAMP_NONE,
+            .border_color = .int_opaque_black,
+            .unnormalized_coordinates = vk.FALSE,
+        }, "Graphic Context Immutable Sampler");
+
         return self;
     }
 
     pub fn deinit(self: GraphicsContext) void {
+        self.destroy(self.immutable_samplers);
         self.allocator.destroy();
         self.destroy(self.pool);
         self.vkd.destroyDevice(self.dev, null);
