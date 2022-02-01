@@ -16,6 +16,7 @@ const BasicRenderer = @import("BasicRenderer.zig");
 const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
+const vertex = @import("vertex.zig");
 const Window = @import("Window.zig");
 const Self = @This();
 const srcToString = @import("util.zig").srcToString;
@@ -38,12 +39,7 @@ const UniformBufferObject = struct {
 const PushConstant = struct {
     texture_id: u32,
 };
-const Vertex = struct {
-    position: Vec3,
-    tex_coord: Vec2,
-    normal: Vec3,
-};
-
+const Vertex = vertex.Vertex;
 const VertexArray = std.MultiArrayList(Vertex);
 
 allocator: std.mem.Allocator,
@@ -56,7 +52,7 @@ gc: GraphicsContext,
 swapchain: Swapchain,
 renderer: BasicRenderer,
 framebuffers: []vk.Framebuffer,
-vertex_buffer: [3]Buffer,
+vertex_buffer: vertex.VertexBuffer,
 textures: [2]Texture,
 skybox_textures: [3]Texture,
 skybox_pipeline: Pipeline,
@@ -112,7 +108,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         resources.triangle_vert,
         "main",
-        .{ .vertex = Shader.getVertexInput(&.{ .position, .tex_coord, .normal }) },
+        .{ .vertex = vertex.InputDescription.get(&.{ .position, .tex_coord, .normal }) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -154,25 +150,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     //*********************************
 
     const frame_size = @truncate(u32, self.framebuffers.len);
-
-    self.vertex_buffer[0] = try Buffer.init(self.gc, Buffer.CreateInfo{
-        .size = @sizeOf(Vec3) * self.vertices.len,
-        .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-        .memory_usage = .gpu_only,
-        .memory_flags = .{},
-    }, srcToString(@src()));
-    self.vertex_buffer[1] = try Buffer.init(self.gc, Buffer.CreateInfo{
-        .size = @sizeOf(Vec2) * self.vertices.len,
-        .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-        .memory_usage = .gpu_only,
-        .memory_flags = .{},
-    }, srcToString(@src()));
-    self.vertex_buffer[2] = try Buffer.init(self.gc, Buffer.CreateInfo{
-        .size = @sizeOf(Vec3) * self.vertices.len,
-        .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-        .memory_usage = .gpu_only,
-        .memory_flags = .{},
-    }, srcToString(@src()));
+    self.vertex_buffer = try vertex.VertexBuffer.init(self.gc, self.vertices.len, srcToString(@src()));
     self.textures = [_]Texture{
         try Texture.loadFromMemory(self.gc, .texture, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadFromFile(
@@ -210,7 +188,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         resources.skybox_vert,
         "main",
-        .{ .vertex = Shader.getVertexInput(&.{.position}) },
+        .{ .vertex = vertex.InputDescription.get(&.{.position}) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -277,9 +255,9 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // uploadVertices
     const slice = self.vertices.slice();
-    try self.vertex_buffer[0].upload(Vec3, self.gc, slice.items(.position));
-    try self.vertex_buffer[1].upload(Vec2, self.gc, slice.items(.tex_coord));
-    try self.vertex_buffer[2].upload(Vec3, self.gc, slice.items(.normal));
+    try self.vertex_buffer.get(.position).upload(Vec3, self.gc, slice.items(.position));
+    try self.vertex_buffer.get(.tex_coord).upload(Vec2, self.gc, slice.items(.tex_coord));
+    try self.vertex_buffer.get(.normal).upload(Vec3, self.gc, slice.items(.normal));
     //Upload indices
     try self.index_buffer.upload(u32, self.gc, self.indices.items);
 
@@ -396,9 +374,7 @@ pub fn deinit(self: *Self) void {
         texture.deinit(self.gc);
     }
     self.index_buffer.deinit(self.gc);
-    for (self.vertex_buffer) |vb| {
-        vb.deinit(self.gc);
-    }
+    self.vertex_buffer.deinit(self.gc);
     destroyFramebuffers(&self.gc, self.allocator, self.framebuffers);
     self.renderer.deinit(self.gc);
     self.swapchain.deinit(self.gc);
@@ -509,7 +485,7 @@ fn buildCommandBuffers(
     i: u32,
     framebuffer: vk.Framebuffer,
     cmdbuf: vk.CommandBuffer,
-    vertex_buffer: [3]Buffer,
+    vertex_buffer: vertex.VertexBuffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     bindless: vk.DescriptorSet,
@@ -521,12 +497,7 @@ fn buildCommandBuffers(
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
-    const offset = [_]vk.DeviceSize{ 0, 0, 0 };
-    gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 3, &[_]vk.Buffer{
-        vertex_buffer[0].buffer,
-        vertex_buffer[1].buffer,
-        vertex_buffer[2].buffer,
-    }, &offset);
+    vertex_buffer.bind(gc, cmdbuf, &vertex.VertexBuffer.zero_offsets);
     gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
     gc.vkd.cmdBindDescriptorSets(
         cmdbuf,

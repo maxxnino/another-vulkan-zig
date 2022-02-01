@@ -28,10 +28,10 @@ pub fn addShader(self: *Self, shader: Shader) !void {
             assert(self.vertex_stage_info == null);
             self.vertex_stage_info = .{
                 .flags = .{},
-                .vertex_binding_description_count = @truncate(u32, v.input_binding.len),
-                .p_vertex_binding_descriptions = v.input_binding.ptr,
-                .vertex_attribute_description_count = @truncate(u32, v.input_attribute.len),
-                .p_vertex_attribute_descriptions = v.input_attribute.ptr,
+                .vertex_binding_description_count = @truncate(u32, v.binding.len),
+                .p_vertex_binding_descriptions = v.binding.ptr,
+                .vertex_attribute_description_count = @truncate(u32, v.attribute.len),
+                .p_vertex_attribute_descriptions = v.attribute.ptr,
             };
 
             break :blk .{ .vertex_bit = true };
