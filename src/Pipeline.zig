@@ -291,6 +291,19 @@ pub fn bind(self: Self, gc: GraphicsContext, command_buffer: vk.CommandBuffer) v
     gc.vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
 }
 
+pub fn pushConstant(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, stage: vk.ShaderStageFlags, data: anytype) void {
+    const size = @sizeOf(@TypeOf(data));
+    std.debug.assert(size <= gc.props.limits.max_push_constants_size);
+    gc.vkd.cmdPushConstants(
+        cmdbuf,
+        self.pipeline_layout,
+        stage,
+        0,
+        size,
+        @ptrCast(*const anyopaque, &data),
+    );
+}
+
 pub fn deinit(self: Self, gc: GraphicsContext) void {
     gc.destroy(self.descriptor_set_layout);
     gc.destroy(self.bindless_set_layout);

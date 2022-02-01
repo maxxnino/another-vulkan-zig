@@ -506,25 +506,16 @@ fn buildCommandBuffers(
         0,
         undefined,
     );
-    gc.vkd.cmdPushConstants(
-        cmdbuf,
-        renderer.pipeline.pipeline_layout,
-        .{ .fragment_bit = true },
-        0,
-        @sizeOf(PushConstant),
-        @ptrCast(*const anyopaque, &push_constant[0]),
-    );
+    renderer.pipeline.pushConstant(gc, cmdbuf, .{ .fragment_bit = true }, push_constant[0]);
     viking_room.draw(gc, cmdbuf, meshs);
 
     //draw skybox
     skybox.bind(gc, cmdbuf);
-    gc.vkd.cmdPushConstants(
+    skybox.pushConstant(
+        gc,
         cmdbuf,
-        skybox.pipeline_layout,
         .{ .fragment_bit = true },
-        0,
-        @sizeOf(PushConstant),
-        @ptrCast(*const anyopaque, &PushConstant{ .texture_id = push_constant[1].texture_id + 2 }),
+        PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
     );
     cube.draw(gc, cmdbuf, meshs);
     try renderer.endFrame(gc, cmdbuf);
