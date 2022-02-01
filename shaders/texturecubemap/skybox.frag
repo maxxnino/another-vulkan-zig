@@ -8,9 +8,7 @@ layout(push_constant) uniform PushConstant {
 layout (location = 0) in vec3 in_uvw;
 layout (location = 0) out vec4 out_frag_color;
 
-layout (set = 1, binding = 0) uniform samplerCube sampler_cubemaps[];
-
-
+layout (set = 0, binding = 0) uniform samplerCube sampler_cubemaps[];
 
 void main() 
 {

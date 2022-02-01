@@ -500,8 +500,8 @@ fn buildCommandBuffers(
         0,
         2,
         &[_]vk.DescriptorSet{
-            sets[i],
             bindless,
+            sets[i],
         },
         0,
         undefined,

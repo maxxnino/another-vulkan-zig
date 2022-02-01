@@ -48,8 +48,8 @@ fn createLayout(
         .flags = .{},
         .set_layout_count = 2,
         .p_set_layouts = &[_]vk.DescriptorSetLayout{
-            self.descriptor_set_layout,
             self.bindless_set_layout,
+            self.descriptor_set_layout,
         },
         .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
         .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
