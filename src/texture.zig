@@ -42,7 +42,7 @@ pub const Texture = struct {
             .memory_flags = .{},
         }, label);
         defer stage_buffer.deinit(gc);
-        try stage_buffer.update(u8, gc, buffer);
+        try stage_buffer.upload(u8, gc, buffer);
         const width = switch (@"type") {
             .texture => in_width,
             .cube_map => in_width / 6,

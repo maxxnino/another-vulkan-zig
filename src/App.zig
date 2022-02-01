@@ -14,7 +14,6 @@ const Shader = @import("Shader.zig");
 const ShaderBinding = @import("ShaderBinding.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
 const Pipeline = @import("Pipeline.zig");
-const Vertex = @import("Vertex.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
 const Window = @import("Window.zig");
@@ -39,17 +38,25 @@ const UniformBufferObject = struct {
 const PushConstant = struct {
     texture_id: u32,
 };
+const Vertex = struct {
+    position: Vec3,
+    tex_coord: Vec2,
+    normal: Vec3,
+};
+
+const VertexArray = std.MultiArrayList(Vertex);
+
 allocator: std.mem.Allocator,
 window: Window,
 timer: std.time.Timer,
 indices: std.ArrayList(u32),
-vertices: std.ArrayList(Vertex),
+vertices: VertexArray,
 meshs: std.ArrayList(Mesh),
 gc: GraphicsContext,
 swapchain: Swapchain,
 renderer: BasicRenderer,
 framebuffers: []vk.Framebuffer,
-vertex_buffer: Buffer,
+vertex_buffer: [3]Buffer,
 textures: [2]Texture,
 skybox_textures: [3]Texture,
 skybox_pipeline: Pipeline,
@@ -70,15 +77,15 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ********** load Model **********
     self.indices = std.ArrayList(u32).init(allocator);
-    self.vertices = std.ArrayList(Vertex).init(allocator);
+    self.vertices = VertexArray{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
     var arena = std.heap.ArenaAllocator.init(allocator);
-    appendGltfModel(arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/untitled.gltf");
+    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/untitled.gltf");
     self.viking_room = Model{
         .mesh_begin = 0,
         .mesh_end = @truncate(u32, self.meshs.items.len),
     };
-    appendGltfModel(arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/cube.gltf");
+    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/cube.gltf");
     self.cube = Model{
         .mesh_begin = self.viking_room.mesh_end,
         .mesh_end = @truncate(u32, self.meshs.items.len),
@@ -103,33 +110,27 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }};
     const vert_shader = try Shader.createFromMemory(
         self.gc,
-        allocator,
         resources.triangle_vert,
         "main",
-        .{ .vertex_bit = true },
-        &[_]Shader.BindingInfo{.{
+        .{ .vertex = Shader.getVertexInput(&.{ .position, .tex_coord, .normal }) },
+        &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
         }},
-        &.{
-            .binding = &Vertex.binding_description,
-            .attribute = &Vertex.attribute_description,
-        },
+
         srcToString(@src()),
     );
     defer vert_shader.deinit(self.gc);
 
     const frag_shader = try Shader.createFromMemory(
         self.gc,
-        allocator,
         resources.triangle_frag,
         "main",
-        .{ .fragment_bit = true },
-        &[_]Shader.BindingInfo{.{
+        .{ .fragment = {} },
+        &[_]Shader.DescriptorBindingLayout{.{
             .binding = 1,
             .descriptor_type = .combined_image_sampler,
         }},
-        null,
         srcToString(@src()),
     );
     defer frag_shader.deinit(self.gc);
@@ -154,8 +155,20 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     const frame_size = @truncate(u32, self.framebuffers.len);
 
-    self.vertex_buffer = try Buffer.init(self.gc, Buffer.CreateInfo{
-        .size = @sizeOf(Vertex) * self.vertices.items.len,
+    self.vertex_buffer[0] = try Buffer.init(self.gc, Buffer.CreateInfo{
+        .size = @sizeOf(Vec3) * self.vertices.len,
+        .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+        .memory_usage = .gpu_only,
+        .memory_flags = .{},
+    }, srcToString(@src()));
+    self.vertex_buffer[1] = try Buffer.init(self.gc, Buffer.CreateInfo{
+        .size = @sizeOf(Vec2) * self.vertices.len,
+        .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
+        .memory_usage = .gpu_only,
+        .memory_flags = .{},
+    }, srcToString(@src()));
+    self.vertex_buffer[2] = try Buffer.init(self.gc, Buffer.CreateInfo{
+        .size = @sizeOf(Vec3) * self.vertices.len,
         .buffer_usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
         .memory_usage = .gpu_only,
         .memory_flags = .{},
@@ -195,44 +208,26 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     };
     const skybox_vert = try Shader.createFromMemory(
         self.gc,
-        allocator,
         resources.skybox_vert,
         "main",
-        .{ .vertex_bit = true },
-        &[_]Shader.BindingInfo{.{
+        .{ .vertex = Shader.getVertexInput(&.{.position}) },
+        &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
         }},
-        &.{
-            .binding = &[_]vk.VertexInputBindingDescription{.{
-                .binding = 0,
-                .stride = @sizeOf(Vertex),
-                .input_rate = .vertex,
-            }},
-            .attribute = &[_]vk.VertexInputAttributeDescription{
-                .{
-                    .binding = 0,
-                    .location = 0,
-                    .format = .r32g32b32_sfloat,
-                    .offset = 0,
-                },
-            },
-        },
         srcToString(@src()),
     );
     defer skybox_vert.deinit(self.gc);
 
     const skybox_frag = try Shader.createFromMemory(
         self.gc,
-        allocator,
         resources.skybox_frag,
         "main",
-        .{ .fragment_bit = true },
-        &[_]Shader.BindingInfo{.{
+        .{ .fragment = {} },
+        &[_]Shader.DescriptorBindingLayout{.{
             .binding = 1,
             .descriptor_type = .combined_image_sampler,
         }},
-        null,
         srcToString(@src()),
     );
     defer skybox_frag.deinit(self.gc);
@@ -266,7 +261,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .memory_usage = .cpu_to_gpu,
             .memory_flags = .{},
         }, srcToString(@src()));
-        try ubo.update(UniformBufferObject, self.gc, &[_]UniformBufferObject{.{
+        try ubo.upload(UniformBufferObject, self.gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
             .view = self.camera.getViewMatrix(),
             .proj = self.camera.getProjMatrix(self.swapchain.extent.width, self.swapchain.extent.height),
@@ -281,9 +276,12 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, srcToString(@src()));
 
     // uploadVertices
-    try uploadData(Vertex, self.gc, self.vertex_buffer, self.vertices.items);
+    const slice = self.vertices.slice();
+    try self.vertex_buffer[0].upload(Vec3, self.gc, slice.items(.position));
+    try self.vertex_buffer[1].upload(Vec2, self.gc, slice.items(.tex_coord));
+    try self.vertex_buffer[2].upload(Vec3, self.gc, slice.items(.normal));
     //Upload indices
-    try uploadData(u32, self.gc, self.index_buffer, self.indices.items);
+    try self.index_buffer.upload(u32, self.gc, self.indices.items);
 
     // Desciptor Set
     // const pool_size = frame_size;
@@ -382,7 +380,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     return self;
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: *Self) void {
     self.draw_pool.deinit(self.gc);
     self.gc.destroy(self.descriptor_pool);
     self.allocator.free(self.des_sets);
@@ -398,13 +396,15 @@ pub fn deinit(self: Self) void {
         texture.deinit(self.gc);
     }
     self.index_buffer.deinit(self.gc);
-    self.vertex_buffer.deinit(self.gc);
+    for (self.vertex_buffer) |vb| {
+        vb.deinit(self.gc);
+    }
     destroyFramebuffers(&self.gc, self.allocator, self.framebuffers);
     self.renderer.deinit(self.gc);
     self.swapchain.deinit(self.gc);
     self.gc.deinit();
     self.indices.deinit();
-    self.vertices.deinit();
+    self.vertices.deinit(self.allocator);
     self.meshs.deinit();
     self.window.deinit();
 }
@@ -415,7 +415,7 @@ pub fn run(self: *Self) !void {
         const dt = @intToFloat(f32, self.timer.lap()) / @intToFloat(f32, std.time.ns_per_s);
 
         self.camera.moveCamera(self.window, dt);
-        try self.ubo_buffers[self.swapchain.image_index].update(UniformBufferObject, self.gc, &[_]UniformBufferObject{.{
+        try self.ubo_buffers[self.swapchain.image_index].upload(UniformBufferObject, self.gc, &[_]UniformBufferObject{.{
             .model = Mat4.identity(),
             .view = self.camera.getViewMatrix(),
             .proj = self.camera.getProjMatrix(self.swapchain.extent.width, self.swapchain.extent.height),
@@ -435,7 +435,7 @@ pub fn run(self: *Self) !void {
             self.swapchain.image_index,
             self.framebuffers[self.swapchain.image_index],
             cmdbuf.cmd,
-            self.vertex_buffer.buffer,
+            self.vertex_buffer,
             self.index_buffer.buffer,
             self.des_sets,
             self.bindless_sets,
@@ -465,19 +465,6 @@ pub fn run(self: *Self) !void {
     try self.swapchain.waitForAllFences(self.gc);
 }
 
-pub fn uploadData(comptime T: type, gc: GraphicsContext, buffer: Buffer, data: []const T) !void {
-    const size = @sizeOf(T) * data.len;
-    const stage_buffer = try Buffer.init(gc, .{
-        .size = size,
-        .buffer_usage = .{ .transfer_src_bit = true },
-        .memory_usage = .cpu_to_gpu,
-        .memory_flags = .{},
-    }, srcToString(@src()));
-    defer stage_buffer.deinit(gc);
-    try stage_buffer.update(T, gc, data);
-    try stage_buffer.copyToBuffer(buffer, gc);
-}
-
 fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer) void {
     const wds = [_]vk.WriteDescriptorSet{
         .{
@@ -490,7 +477,7 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
             .p_buffer_info = &[_]vk.DescriptorBufferInfo{.{
                 .buffer = buffer.buffer,
                 .offset = 0,
-                .range = buffer.size,
+                .range = buffer.create_info.size,
             }},
             .p_texel_buffer_view = undefined,
         },
@@ -522,7 +509,7 @@ fn buildCommandBuffers(
     i: u32,
     framebuffer: vk.Framebuffer,
     cmdbuf: vk.CommandBuffer,
-    vertex_buffer: vk.Buffer,
+    vertex_buffer: [3]Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     bindless: vk.DescriptorSet,
@@ -534,8 +521,12 @@ fn buildCommandBuffers(
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
-    const offset = [_]vk.DeviceSize{0};
-    gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast([*]const vk.Buffer, &vertex_buffer), &offset);
+    const offset = [_]vk.DeviceSize{ 0, 0, 0 };
+    gc.vkd.cmdBindVertexBuffers(cmdbuf, 0, 3, &[_]vk.Buffer{
+        vertex_buffer[0].buffer,
+        vertex_buffer[1].buffer,
+        vertex_buffer[2].buffer,
+    }, &offset);
     gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
     gc.vkd.cmdBindDescriptorSets(
         cmdbuf,
@@ -601,9 +592,10 @@ fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebu
 }
 
 pub fn appendGltfModel(
+    base_allocator: Allocator,
     arena: Allocator,
     all_meshes: *std.ArrayList(Mesh),
-    all_vertices: *std.ArrayList(Vertex),
+    all_vertices: *VertexArray,
     all_indices: *std.ArrayList(u32),
     path: [:0]const u8,
 ) void {
@@ -619,7 +611,7 @@ pub fn appendGltfModel(
     const num_meshes = @truncate(u32, data.meshes_count);
     var mesh_index: u32 = 0;
     const base_indices = @truncate(u32, all_indices.items.len);
-    const base_vertices = @truncate(u32, all_vertices.items.len);
+    const base_vertices = @truncate(u32, all_vertices.len);
 
     while (mesh_index < num_meshes) : (mesh_index += 1) {
         const num_prims = @intCast(u32, data.meshes[mesh_index].primitives_count);
@@ -645,10 +637,10 @@ pub fn appendGltfModel(
         all_indices.appendAssumeCapacity(index);
     }
 
-    all_vertices.ensureTotalCapacity(positions.items.len) catch unreachable;
+    all_vertices.ensureTotalCapacity(base_allocator, positions.items.len) catch unreachable;
     for (positions.items) |_, index| {
         all_vertices.appendAssumeCapacity(.{
-            .pos = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
+            .position = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
             // .pos = positions.items[index],
             .normal = normals.items[index],
             .tex_coord = texcoords0.items[index],

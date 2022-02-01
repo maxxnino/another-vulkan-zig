@@ -22,43 +22,43 @@ pub fn init(allocator: std.mem.Allocator) Self {
 }
 
 pub fn addShader(self: *Self, shader: Shader) !void {
-    //create PipelineVertexInputStateCreateInfo if shader_stage is vertex_bit
-    if (shader.stage.contains(.{ .vertex_bit = true })) {
-        if (shader.vertex_info) |vi| {
+    const stage_flags: vk.ShaderStageFlags = switch (shader.stage) {
+        .vertex => |v| blk: {
             //Already create vertex_stage_info
             assert(self.vertex_stage_info == null);
             self.vertex_stage_info = .{
                 .flags = .{},
-                .vertex_binding_description_count = @truncate(u32, vi.binding.len),
-                .p_vertex_binding_descriptions = vi.binding.ptr,
-                .vertex_attribute_description_count = @truncate(u32, vi.attribute.len),
-                .p_vertex_attribute_descriptions = vi.attribute.ptr,
+                .vertex_binding_description_count = @truncate(u32, v.input_binding.len),
+                .p_vertex_binding_descriptions = v.input_binding.ptr,
+                .vertex_attribute_description_count = @truncate(u32, v.input_attribute.len),
+                .p_vertex_attribute_descriptions = v.input_attribute.ptr,
             };
-        }
-    }
 
-    // build DescriptorSetLayoutBinding
-    for (shader.bindings_info) |info| {
+            break :blk .{ .vertex_bit = true };
+        },
+        .fragment => .{ .fragment_bit = true },
+    };
+
+    // DescriptorSetLayoutBinding
+    for (shader.layouts) |info| {
         if (self.layout.getEntry(info.binding)) |dslb| {
             // Same binding but different type,
             assert(dslb.value_ptr.descriptor_type == info.descriptor_type);
-
-            dslb.value_ptr.stage_flags = dslb.value_ptr.stage_flags.merge(shader.stage);
+            dslb.value_ptr.stage_flags = dslb.value_ptr.stage_flags.merge(stage_flags);
         } else {
             try self.layout.put(info.binding, .{
                 .binding = info.binding,
                 .descriptor_type = info.descriptor_type,
                 .descriptor_count = 1,
-                .stage_flags = shader.stage,
+                .stage_flags = stage_flags,
                 .p_immutable_samplers = null,
             });
         }
     }
-
-    // build PipelineShaderStageCreateInfo array
+    // PipelineShaderStageCreateInfo
     try self.shader_stage.append(.{
         .flags = .{},
-        .stage = shader.stage,
+        .stage = stage_flags,
         .module = shader.module,
         .p_name = shader.entry,
         .p_specialization_info = null,
