@@ -16,7 +16,7 @@ const Buffer = @This();
 buffer: vk.Buffer,
 allocation: vma.Allocation,
 info: vma.AllocationInfo,
-size: vk.DeviceSize,
+create_info: CreateInfo,
 
 pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]const u8) !Buffer {
     var allocation_info: vma.AllocationInfo = undefined;
@@ -42,7 +42,7 @@ pub fn init(gc: GraphicsContext, create_info: CreateInfo, object_name: ?[*:0]con
     buffer.buffer = result.buffer;
     buffer.allocation = result.allocation;
     buffer.info = allocation_info;
-    buffer.size = create_info.size;
+    buffer.create_info = create_info;
     return buffer;
 }
 
@@ -50,26 +50,41 @@ pub fn deinit(self: Buffer, gc: GraphicsContext) void {
     gc.allocator.destroyBuffer(self.buffer, self.allocation);
 }
 
-pub fn update(self: Buffer, comptime T: type, gc: GraphicsContext, in_data: []const T) !void {
-    const gpu_mem = if (self.info.pMappedData) |data|
-        @intToPtr([*]T, @ptrToInt(data))
-    else
-        try gc.allocator.mapMemory(self.allocation, T);
+pub fn upload(self: Buffer, comptime T: type, gc: GraphicsContext, data: []const T) !void {
+    switch (self.create_info.memory_usage) {
+        .gpu_only => {
+            const size = @sizeOf(T) * data.len;
+            const stage_buffer = try Buffer.init(gc, .{
+                .size = size,
+                .buffer_usage = .{ .transfer_src_bit = true },
+                .memory_usage = .cpu_to_gpu,
+                .memory_flags = .{},
+            }, srcToString(@src()));
+            defer stage_buffer.deinit(gc);
+            stage_buffer.upload(T, gc, data) catch unreachable;
+            try stage_buffer.copyToBuffer(self, gc);
+        },
+        .cpu_to_gpu => {
+            const gpu_mem = if (self.info.pMappedData) |mem|
+                @intToPtr([*]T, @ptrToInt(mem))
+            else
+                try gc.allocator.mapMemory(self.allocation, T);
 
-    for (in_data) |d, i| {
-        gpu_mem[i] = d;
+            for (data) |d, i| {
+                gpu_mem[i] = d;
+            }
+
+            // Flush allocation
+            try gc.allocator.flushAllocation(self.allocation, 0, self.info.size);
+            if (self.info.pMappedData == null) {
+                gc.allocator.unmapMemory(self.allocation);
+            }
+        },
+        else => unreachable,
     }
-    try self.flush(gc);
 }
 
-fn flush(self: Buffer, gc: GraphicsContext) !void {
-    try gc.allocator.flushAllocation(self.allocation, 0, self.info.size);
-    if (self.info.pMappedData == null) {
-        gc.allocator.unmapMemory(self.allocation);
-    }
-}
-
-pub fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
+fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
     // TODO: because smallest buffer size is 256 byte.
     // if data size is < 256, group multiple data to one buffer
     // std.log.info("src: info size: {}, data size: {}", .{src.info.size, src.size});
@@ -79,7 +94,7 @@ pub fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
     const region = vk.BufferCopy{
         .src_offset = 0,
         .dst_offset = 0,
-        .size = src.size,
+        .size = src.create_info.size,
     };
     gc.vkd.cmdCopyBuffer(cmdbuf, src.buffer, dst.buffer, 1, @ptrCast([*]const vk.BufferCopy, &region));
 
