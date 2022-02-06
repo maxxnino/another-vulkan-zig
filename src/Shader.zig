@@ -1,24 +1,23 @@
+module: vk.ShaderModule,
+stage: Stage,
+entry: [*:0]const u8,
+layouts: []const DescriptorBindingLayout,
+
 const std = @import("std");
 const vk = @import("vulkan");
 const builtin = @import("builtin");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
-const vertex = @import("vertex.zig");
+const VertexInputDescription = @import("vertex.zig").VertexInputDescription;
 const Self = @This();
-
 
 pub const DescriptorBindingLayout = struct {
     binding: u32,
     descriptor_type: vk.DescriptorType,
 };
 pub const Stage = union(enum) {
-    vertex: vertex.InputDescription,
+    vertex: VertexInputDescription,
     fragment,
 };
-
-module: vk.ShaderModule,
-stage: Stage,
-entry: [*:0]const u8,
-layouts: []const DescriptorBindingLayout,
 
 pub fn createFromMemory(
     gc: GraphicsContext,

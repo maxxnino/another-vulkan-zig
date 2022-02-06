@@ -16,7 +16,7 @@ const BasicRenderer = @import("BasicRenderer.zig");
 const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
-const vertex = @import("vertex.zig");
+const VertexGen = @import("vertex.zig").VertexGen;
 const Window = @import("Window.zig");
 const Self = @This();
 const srcToString = @import("util.zig").srcToString;
@@ -28,6 +28,12 @@ const Mat4 = z.Mat4;
 const Vec3 = z.Vec3;
 const Vec2 = z.Vec2;
 const Vec4 = z.Vec4;
+
+const Vertex = VertexGen(struct {
+    position: Vec3,
+    tex_coord: Vec2,
+    normal: Vec3,
+});
 
 const app_name = "vulkan + glfw";
 const UniformBufferObject = struct {
@@ -44,13 +50,13 @@ allocator: std.mem.Allocator,
 window: Window,
 timer: std.time.Timer,
 indices: std.ArrayList(u32),
-vertices: vertex.VertexArray,
+vertices: Vertex.ArrayList,
 meshs: std.ArrayList(Mesh),
 gc: GraphicsContext,
 swapchain: Swapchain,
 renderer: BasicRenderer,
 framebuffers: []vk.Framebuffer,
-vertex_buffer: vertex.VertexBuffer,
+vertex_buffer: Vertex.Buffer,
 textures: [2]Texture,
 skybox_textures: [3]Texture,
 skybox_pipeline: Pipeline,
@@ -72,7 +78,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ********** load Model **********
     self.indices = std.ArrayList(u32).init(allocator);
-    self.vertices = vertex.VertexArray{};
+    self.vertices = Vertex.ArrayList{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
     var arena = std.heap.ArenaAllocator.init(allocator);
     appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/untitled.gltf");
@@ -107,7 +113,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         resources.triangle_vert,
         "main",
-        .{ .vertex = vertex.InputDescription.get(&.{ .position, .tex_coord, .normal }) },
+        .{ .vertex = Vertex.inputDescription(&.{ .position, .tex_coord, .normal }) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -186,7 +192,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         resources.skybox_vert,
         "main",
-        .{ .vertex = vertex.InputDescription.get(&.{.position}) },
+        .{ .vertex = Vertex.inputDescription(&.{.position}) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -252,7 +258,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, srcToString(@src()));
 
     // uploadVertices
-    self.vertex_buffer = try vertex.VertexBuffer.init(self.gc, self.vertices.slice(), srcToString(@src()));
+    self.vertex_buffer = try Vertex.Buffer.init(self.gc, self.vertices.slice(), srcToString(@src()));
     //Upload indices
     try self.index_buffer.upload(u32, self.gc, self.indices.items);
 
@@ -496,7 +502,7 @@ fn buildCommandBuffers(
     i: u32,
     framebuffer: vk.Framebuffer,
     cmdbuf: vk.CommandBuffer,
-    vertex_buffer: vertex.VertexBuffer,
+    vertex_buffer: Vertex.Buffer,
     index_buffer: vk.Buffer,
     sets: []const vk.DescriptorSet,
     bindless: vk.DescriptorSet,
@@ -509,7 +515,7 @@ fn buildCommandBuffers(
 ) !void {
     try renderer.beginFrame(gc, framebuffer, cmdbuf);
 
-    vertex_buffer.bind(gc, cmdbuf, vertex.VertexBuffer.zero_offsets);
+    vertex_buffer.bind(gc, cmdbuf, Vertex.Buffer.zero_offsets);
     gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
     gc.vkd.cmdBindDescriptorSets(
         cmdbuf,
@@ -570,7 +576,7 @@ pub fn appendGltfModel(
     base_allocator: Allocator,
     arena: Allocator,
     all_meshes: *std.ArrayList(Mesh),
-    all_vertices: *vertex.VertexArray,
+    all_vertices: *Vertex.ArrayList,
     all_indices: *std.ArrayList(u32),
     path: [:0]const u8,
 ) void {
