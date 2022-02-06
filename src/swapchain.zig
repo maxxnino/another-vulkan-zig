@@ -107,6 +107,8 @@ pub const Swapchain = struct {
     fn deinitExceptSwapchain(self: Swapchain, gc: GraphicsContext) void {
         for (self.swap_images) |si| si.deinit(gc);
         gc.destroy(self.next_image_acquired);
+        self.allocator.free(self.swap_images);
+
     }
 
     pub fn waitForAllFences(self: Swapchain, gc: GraphicsContext) !void {
@@ -116,7 +118,6 @@ pub const Swapchain = struct {
     pub fn deinit(self: Swapchain, gc: GraphicsContext) void {
         self.deinitExceptSwapchain(gc);
         gc.vkd.destroySwapchainKHR(gc.dev, self.handle, null);
-        self.allocator.free(self.swap_images);
     }
 
     pub fn recreate(self: *Swapchain, gc: GraphicsContext, new_extent: vk.Extent2D) !void {
