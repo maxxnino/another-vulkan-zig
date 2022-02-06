@@ -33,6 +33,7 @@ const Vertex = VertexGen(struct {
     position: Vec3,
     tex_coord: Vec2,
     normal: Vec3,
+    tangent: Vec4
 });
 
 const app_name = "vulkan + glfw";
@@ -40,10 +41,38 @@ const UniformBufferObject = struct {
     model: Mat4,
     view: Mat4,
     proj: Mat4,
+    camera_pos: Vec3,
 };
 
+const Light = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    const speed: f32 = 10;
+
+    pub fn update(self: *Light, window: Window, dt: f32) void {
+        var h: f32 = 0;
+        var v: f32 = 0;
+        if (window.isKey(.right, .press)) h += 1;
+        if (window.isKey(.left, .press)) h -= 1;
+        if (window.isKey(.up, .press)) v += 1;
+        if (window.isKey(.down, .press)) v -= 1;
+        self.x += h * dt * speed;
+        self.z += v * dt * speed;
+    }
+
+    fn getPos(self: Light) Vec3 {
+        return Vec3.new(self.x, self.y, self.z);
+    }
+};
+
+
 const PushConstant = struct {
-    texture_id: u32,
+    base_color_id: u32,
+    normal_id: u32 = 0,
+    metalic_roughtness_id: u32 = 0,
+    ao_id: u32 = 0,
+    light: Vec3,
 };
 
 allocator: std.mem.Allocator,
@@ -57,10 +86,12 @@ swapchain: Swapchain,
 renderer: BasicRenderer,
 framebuffers: []vk.Framebuffer,
 vertex_buffer: Vertex.Buffer,
-textures: [2]Texture,
+textures: [5]Texture,
 skybox_textures: [3]Texture,
 skybox_pipeline: Pipeline,
-push_constant: [2]PushConstant,
+skybox_push_constant: PushConstant,
+object_push_constant: PushConstant,
+current_mat: u32 = 0,
 camera: Camera,
 ubo_buffers: []Buffer,
 index_buffer: Buffer,
@@ -71,6 +102,7 @@ immutable_sampler_set: vk.DescriptorSet,
 draw_pool: DrawPool,
 cube: Model,
 viking_room: Model,
+light: Light,
 pub fn init(allocator: std.mem.Allocator) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
@@ -81,7 +113,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     self.vertices = Vertex.ArrayList{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
     var arena = std.heap.ArenaAllocator.init(allocator);
-    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/untitled.gltf");
+    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet.gltf");
     self.viking_room = Model{
         .mesh_begin = 0,
         .mesh_end = @truncate(u32, self.meshs.items.len),
@@ -102,18 +134,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ********** BasicRenderer **********
 
-    // Define the push constant range used by the pipeline layout
-    // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
-    const push_constants = [_]vk.PushConstantRange{.{
-        .stage_flags = .{ .fragment_bit = true },
-        .offset = 0,
-        .size = @sizeOf(PushConstant),
-    }};
     const vert_shader = try Shader.createFromMemory(
         self.gc,
         resources.triangle_vert,
         "main",
-        .{ .vertex = Vertex.inputDescription(&.{ .position, .tex_coord, .normal }) },
+        .{ .vertex = Vertex.inputDescription(&.{ .position, .tex_coord, .normal, .tangent }) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -129,8 +154,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "main",
         .{ .fragment = {} },
         &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 1,
-            .descriptor_type = .combined_image_sampler,
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
         }},
         srcToString(@src()),
     );
@@ -141,12 +166,19 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     try shader_binding.addShader(vert_shader);
     try shader_binding.addShader(frag_shader);
 
+    // Define the push constant range used by the pipeline layout
+    // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
+    const push_constant = [_]vk.PushConstantRange{.{
+        .stage_flags = .{ .fragment_bit = true },
+        .offset = 0,
+        .size = @sizeOf(PushConstant),
+    }};
     self.renderer = try BasicRenderer.init(
         self.gc,
         self.swapchain.extent,
         shader_binding,
         self.swapchain.surface_format.format,
-        &push_constants,
+        &push_constant,
         .{},
         "basic pipeline " ++ srcToString(@src()),
     );
@@ -160,7 +192,25 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         try Texture.loadFromFile(
             self.gc,
             .texture,
-            "assets/viking_room.png",
+            "assets/SciFiHelmet/SciFiHelmet_BaseColor.png",
+            .{ .anisotropy = true, .mip_map = true },
+        ),
+        try Texture.loadFromFile(
+            self.gc,
+            .texture,
+            "assets/SciFiHelmet/SciFiHelmet_Normal.png",
+            .{ .anisotropy = true, .mip_map = true },
+        ),
+        try Texture.loadFromFile(
+            self.gc,
+            .texture,
+            "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.png",
+            .{ .anisotropy = true, .mip_map = true },
+        ),
+        try Texture.loadFromFile(
+            self.gc,
+            .texture,
+            "assets/SciFiHelmet/SciFiHelmet_AmbientOcclusion.png",
             .{ .anisotropy = true, .mip_map = true },
         ),
     };
@@ -207,8 +257,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "main",
         .{ .fragment = {} },
         &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 1,
-            .descriptor_type = .combined_image_sampler,
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
         }},
         srcToString(@src()),
     );
@@ -218,12 +268,12 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     defer skybox_binding.deinit();
     try skybox_binding.addShader(skybox_vert);
     try skybox_binding.addShader(skybox_frag);
+
     self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
         self.gc,
         self.renderer.render_pass,
         skybox_binding,
-        &push_constants,
-
+        &push_constant,
         .{},
         "skybox " ++ srcToString(@src()),
     );
@@ -233,6 +283,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .yaw = 30,
         .pos = Vec3.new(0, 2, 4),
     };
+    self.light = .{};
 
     self.ubo_buffers = try allocator.alloc(Buffer, self.framebuffers.len);
 
@@ -247,6 +298,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .model = Mat4.identity(),
             .view = self.camera.getViewMatrix(),
             .proj = self.camera.getProjMatrix(self.swapchain.extent.width, self.swapchain.extent.height),
+            .camera_pos = self.camera.pos,
         }});
     }
 
@@ -320,27 +372,24 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.bindless_sets));
     try self.gc.markHandle(self.bindless_sets, .descriptor_set, "bindless " ++ srcToString(@src()));
     {
-        const dii = [_]vk.DescriptorImageInfo{ .{
-            .sampler = undefined,
-            .image_view = self.textures[0].view,
-            .image_layout = self.textures[0].image.layout,
-        }, .{
-            .sampler = undefined,
-            .image_view = self.textures[1].view,
-            .image_layout = self.textures[1].image.layout,
-        }, .{
-            .sampler = undefined,
-            .image_view = self.skybox_textures[0].view,
-            .image_layout = self.skybox_textures[0].image.layout,
-        }, .{
-            .sampler = undefined,
-            .image_view = self.skybox_textures[1].view,
-            .image_layout = self.skybox_textures[1].image.layout,
-        }, .{
-            .sampler = undefined,
-            .image_view = self.skybox_textures[2].view,
-            .image_layout = self.skybox_textures[2].image.layout,
-        } };
+        var dii: [self.textures.len + self.skybox_textures.len]vk.DescriptorImageInfo = undefined;
+        for (self.textures) |t, i| {
+            dii[i] = .{
+                .sampler = undefined,
+                .image_view = t.view,
+                .image_layout = t.image.layout,
+            };
+        }
+        for (self.skybox_textures) |t, index| {
+            const i = index + self.textures.len;
+
+            dii[i] = .{
+                .sampler = undefined,
+                .image_view = t.view,
+                .image_layout = t.image.layout,
+            };
+        }
+
         const wds = [_]vk.WriteDescriptorSet{
             .{
                 .dst_set = self.bindless_sets,
@@ -367,9 +416,17 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     //Timer
     self.timer = try std.time.Timer.start();
-    self.push_constant = [_]PushConstant{
-        .{ .texture_id = 0 },
-        .{ .texture_id = 0 },
+
+    self.object_push_constant = .{
+        .base_color_id = 1,
+        .normal_id = 2,
+        .metalic_roughtness_id = 3,
+        .ao_id = 4,
+        .light = self.light.getPos(),
+    };
+    self.skybox_push_constant = .{
+        .base_color_id = self.textures.len,
+        .light = self.light.getPos(),
     };
     return self;
 }
@@ -411,35 +468,57 @@ pub fn run(self: *Self) !void {
             .model = Mat4.identity(),
             .view = self.camera.getViewMatrix(),
             .proj = self.camera.getProjMatrix(self.swapchain.extent.width, self.swapchain.extent.height),
+            .camera_pos = self.camera.pos,
         }});
-        if (self.window.isKey(.f, .just_press)) {
-            self.push_constant[0].texture_id = (self.push_constant[0].texture_id + 1) % @truncate(u32, self.textures.len);
-        }
 
         if (self.window.isKey(.g, .just_press)) {
-            self.push_constant[1].texture_id = (self.push_constant[1].texture_id + 1) % @truncate(u32, self.skybox_textures.len);
+            const texture_len = @truncate(u32, self.textures.len);
+            const sky_len = @truncate(u32, self.skybox_textures.len);
+            const current = self.skybox_push_constant.base_color_id - texture_len;
+            self.skybox_push_constant.base_color_id = ((current + 1) % sky_len) + texture_len;
         }
-        const cmdbuf = self.draw_pool.createCommandBuffer();
 
-        try buildCommandBuffers(
-            self.gc,
-            self.renderer,
-            self.swapchain.image_index,
-            self.framebuffers[self.swapchain.image_index],
-            cmdbuf.cmd,
-            self.vertex_buffer,
-            self.index_buffer.buffer,
-            self.des_sets,
-            self.bindless_sets,
-            self.immutable_sampler_set,
-            self.meshs.items,
-            self.viking_room,
-            self.skybox_pipeline,
-            self.cube,
-            &self.push_constant,
-        );
+        self.light.update(self.window, dt);
+        self.object_push_constant.light = self.light.getPos();
 
-        const state = self.swapchain.present(self.gc, cmdbuf, &self.draw_pool) catch |err| switch (err) {
+        // ================= Begin Draw ==============
+        const command_buffer = self.draw_pool.createCommandBuffer();
+        {
+            const cmdbuf = command_buffer.cmd;
+            const i = self.swapchain.image_index;
+            try self.renderer.beginFrame(self.gc, self.framebuffers[i], cmdbuf);
+
+            self.vertex_buffer.bind(self.gc, cmdbuf, Vertex.Buffer.zero_offsets);
+            self.gc.vkd.cmdBindIndexBuffer(cmdbuf, self.index_buffer.buffer, 0, .uint32);
+            self.gc.vkd.cmdBindDescriptorSets(
+                cmdbuf,
+                .graphics,
+                self.renderer.pipeline.pipeline_layout,
+                0,
+                3,
+                &[_]vk.DescriptorSet{ self.bindless_sets, self.immutable_sampler_set, self.des_sets[i] },
+                0,
+                undefined,
+            );
+            self.renderer.pipeline.pushConstant(self.gc, cmdbuf, .{ .fragment_bit = true }, self.object_push_constant);
+            self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
+
+            //draw skybox
+            self.skybox_pipeline.bind(self.gc, cmdbuf);
+            self.skybox_pipeline.pushConstant(
+                self.gc,
+                cmdbuf,
+                .{ .fragment_bit = true },
+                self.skybox_push_constant,
+                // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
+            );
+            self.cube.draw(self.gc, cmdbuf, self.meshs.items);
+            try self.renderer.endFrame(self.gc, cmdbuf);
+        }
+
+        // ============= End Draw ===================
+
+        const state = self.swapchain.present(self.gc, command_buffer, &self.draw_pool) catch |err| switch (err) {
             error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
             else => |narrow| return narrow,
         };
@@ -474,76 +553,8 @@ fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, bu
             }},
             .p_texel_buffer_view = undefined,
         },
-        // .{
-        //     .dst_set = descriptor_set,
-        //     .dst_binding = 1,
-        //     .dst_array_element = 0,
-        //     .descriptor_count = 2,
-        //     .descriptor_type = .combined_image_sampler,
-        //     .p_image_info = &[_]vk.DescriptorImageInfo{ .{
-        //         .sampler = textures[0].smapler,
-        //         .image_view = textures[0].view,
-        //         .image_layout = textures[0].image.layout,
-        //     }, .{
-        //         .sampler = textures[1].smapler,
-        //         .image_view = textures[1].view,
-        //         .image_layout = textures[1].image.layout,
-        //     } },
-        //     .p_buffer_info = undefined,
-        //     .p_texel_buffer_view = undefined,
-        // },
     };
     gc.vkd.updateDescriptorSets(gc.dev, @truncate(u32, wds.len), @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
-}
-
-fn buildCommandBuffers(
-    gc: GraphicsContext,
-    renderer: BasicRenderer,
-    i: u32,
-    framebuffer: vk.Framebuffer,
-    cmdbuf: vk.CommandBuffer,
-    vertex_buffer: Vertex.Buffer,
-    index_buffer: vk.Buffer,
-    sets: []const vk.DescriptorSet,
-    bindless: vk.DescriptorSet,
-    immutable_sampler_set: vk.DescriptorSet,
-    meshs: []const Mesh,
-    viking_room: Model,
-    skybox: Pipeline,
-    cube: Model,
-    push_constant: []PushConstant,
-) !void {
-    try renderer.beginFrame(gc, framebuffer, cmdbuf);
-
-    vertex_buffer.bind(gc, cmdbuf, Vertex.Buffer.zero_offsets);
-    gc.vkd.cmdBindIndexBuffer(cmdbuf, index_buffer, 0, .uint32);
-    gc.vkd.cmdBindDescriptorSets(
-        cmdbuf,
-        .graphics,
-        renderer.pipeline.pipeline_layout,
-        0,
-        3,
-        &[_]vk.DescriptorSet{
-            bindless,
-            immutable_sampler_set,
-            sets[i],
-        },
-        0,
-        undefined,
-    );
-    renderer.pipeline.pushConstant(gc, cmdbuf, .{ .fragment_bit = true }, push_constant[0]);
-    viking_room.draw(gc, cmdbuf, meshs);
-
-    //draw skybox
-    skybox.bind(gc, cmdbuf);
-    skybox.pushConstant(
-        gc,
-        cmdbuf,
-        .{ .fragment_bit = true },
-        PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
-    );
-    cube.draw(gc, cmdbuf, meshs);
-    try renderer.endFrame(gc, cmdbuf);
 }
 
 fn createFramebuffers(
@@ -584,7 +595,7 @@ pub fn appendGltfModel(
     var positions = std.ArrayList(Vec3).init(arena);
     var normals = std.ArrayList(Vec3).init(arena);
     var texcoords0 = std.ArrayList(Vec2).init(arena);
-    // var tangents = std.ArrayList(Vec4).init(arena);
+    var tangents = std.ArrayList(Vec4).init(arena);
 
     const data = parseAndLoadGltfFile(path);
     defer cgltf.cgltf_free(data);
@@ -602,7 +613,7 @@ pub fn appendGltfModel(
             const pre_indices_len = indices.items.len;
             const pre_positions_len = positions.items.len;
 
-            appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, &texcoords0, null);
+            appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, &texcoords0, &tangents);
 
             all_meshes.append(.{
                 .index_offset = @intCast(u32, base_indices + pre_indices_len),
@@ -621,11 +632,11 @@ pub fn appendGltfModel(
     all_vertices.ensureTotalCapacity(base_allocator, positions.items.len) catch unreachable;
     for (positions.items) |_, index| {
         all_vertices.appendAssumeCapacity(.{
-            .position = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
-            // .pos = positions.items[index],
+            // .position = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
+            .position = positions.items[index],
             .normal = normals.items[index],
             .tex_coord = texcoords0.items[index],
-            // .tangent = tangents.items[index],
+            .tangent = tangents.items[index],
         });
     }
 }
@@ -744,15 +755,15 @@ fn appendMeshPrimitive(
                     accessor.count * accessor.stride,
                 );
             }
-            // else if (attrib.*.type == c.cgltf_attribute_type_tangent and tangents != null) {
-            //     assert(accessor.*.type == c.cgltf_type_vec4);
-            //     assert(accessor.*.component_type == c.cgltf_component_type_r_32f);
-            //     @memcpy(
-            //         @ptrCast([*]u8, &tangents.?.items[tangents.?.items.len - num_vertices]),
-            //         data_addr,
-            //         accessor.*.count * accessor.*.stride,
-            //     );
-            // }
+            else if (attrib.type == .tangent and tangents != null) {
+                assert(accessor.type == .vec4);
+                assert(accessor.component_type == .r_32f);
+                @memcpy(
+                    @ptrCast([*]u8, &tangents.?.items[tangents.?.items.len - num_vertices]),
+                    data_addr,
+                    accessor.count * accessor.stride,
+                );
+            }
         }
     }
 }
