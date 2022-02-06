@@ -207,18 +207,8 @@ pub const Texture = struct {
         return loadFromMemory(gc, @"type", image.pixels, image.width, image.height, image.channels, config, filename);
     }
 
-    pub fn deinit(self: Texture, gc: GraphicsContext) void {
-        self.image.deinit(gc);
-        gc.destroy(self.view);
-    }
-};
-
-pub const DepthStencilTexture = struct {
-    image: Image,
-    view: vk.ImageView,
-
-    pub fn init(gc: GraphicsContext, width: u32, height: u32, label: ?[*:0]const u8) !DepthStencilTexture {
-        var texture: DepthStencilTexture = undefined;
+    pub fn createDepthStencilTexture(gc: GraphicsContext, width: u32, height: u32, label: ?[*:0]const u8) !Texture {
+        var texture: Texture = undefined;
         texture.image = try Image.init(gc, .{
             .flags = .{},
             .image_type = .@"2d",
@@ -269,23 +259,8 @@ pub const DepthStencilTexture = struct {
         return texture;
     }
 
-    pub fn deinit(self: DepthStencilTexture, gc: GraphicsContext) void {
-        self.image.deinit(gc);
-        gc.destroy(self.view);
-    }
-};
-
-fn calcMipLevel(width: u32, height: u32) u32 {
-    const log2 = std.math.log2(std.math.max(width, height));
-    return @floatToInt(u32, std.math.floor(@intToFloat(f32, log2))) + 1;
-}
-
-pub const RenderTarget = struct {
-    image: Image,
-    view: vk.ImageView,
-
-    pub fn init(gc: GraphicsContext, width: u32, height: u32, format: vk.Format, label: ?[*:0]const u8) !RenderTarget {
-        var texture: RenderTarget = undefined;
+    pub fn createRenderTexture(gc: GraphicsContext, width: u32, height: u32, format: vk.Format, label: ?[*:0]const u8) !Texture{
+        var texture: Texture = undefined;
         texture.image = try Image.init(gc, .{
             .flags = .{},
             .image_type = .@"2d",
@@ -327,8 +302,14 @@ pub const RenderTarget = struct {
         return texture;
     }
 
-    pub fn deinit(self: RenderTarget, gc: GraphicsContext) void {
+    pub fn deinit(self: Texture, gc: GraphicsContext) void {
         self.image.deinit(gc);
         gc.destroy(self.view);
     }
 };
+
+fn calcMipLevel(width: u32, height: u32) u32 {
+    const log2 = std.math.log2(std.math.max(width, height));
+    return @floatToInt(u32, std.math.floor(@intToFloat(f32, log2))) + 1;
+}
+

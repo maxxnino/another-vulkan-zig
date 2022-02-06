@@ -8,8 +8,8 @@ const Options = Pipeline.Options;
 
 pipeline: Pipeline,
 render_pass: vk.RenderPass,
-depth: tex.DepthStencilTexture,
-msaa: tex.RenderTarget,
+depth: tex.Texture,
+msaa: tex.Texture,
 extent: vk.Extent2D,
 format: vk.Format,
 label: ?[*:0]const u8,
@@ -40,14 +40,14 @@ pub fn init(
         opts,
         label,
     );
-    renderer.depth = try tex.DepthStencilTexture.init(
+    renderer.depth = try tex.Texture.createDepthStencilTexture(
         gc,
         extent.width,
         extent.height,
         label,
     );
 
-    renderer.msaa = try tex.RenderTarget.init(
+    renderer.msaa = try tex.Texture.createRenderTexture(
         gc,
         extent.width,
         extent.height,
@@ -137,14 +137,14 @@ fn updateSize(self: *Self, gc: GraphicsContext, width: u32, height: u32) !void {
     self.extent.height = height;
 
     self.depth.deinit(gc);
-        self.depth = try tex.DepthStencilTexture.init(
+        self.depth = try tex.Texture.createDepthStencilTexture(
             gc,
             self.extent.width,
             self.extent.height,
             self.label,
         );
     self.msaa.deinit(gc);
-        self.msaa = try tex.RenderTarget.init(
+        self.msaa = try tex.Texture.createRenderTexture(
             gc,
             self.extent.width,
             self.extent.height,

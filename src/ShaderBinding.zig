@@ -1,17 +1,17 @@
-const std = @import("std");
-const vk = @import("vulkan");
-const assert = std.debug.assert;
-const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
-const Shader = @import("Shader.zig");
-const Self = @This();
-
-const LayoutMap = std.AutoArrayHashMap(u32, vk.DescriptorSetLayoutBinding);
-const ShaderStage = std.ArrayList(vk.PipelineShaderStageCreateInfo);
-
 shaders: []Shader,
 layout: LayoutMap,
 shader_stage: ShaderStage,
 vertex_stage_info: ?vk.PipelineVertexInputStateCreateInfo = null,
+
+const std = @import("std");
+const vk = @import("vulkan");
+const assert = std.debug.assert;
+
+const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
+const Shader = @import("Shader.zig");
+const Self = @This();
+const LayoutMap = std.AutoArrayHashMap(u32, vk.DescriptorSetLayoutBinding);
+const ShaderStage = std.ArrayList(vk.PipelineShaderStageCreateInfo);
 
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
