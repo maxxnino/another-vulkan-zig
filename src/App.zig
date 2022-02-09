@@ -30,10 +30,64 @@ const Vec2 = z.Vec2;
 const Vec4 = z.Vec4;
 
 const Vertex = VertexGen(struct {
-    position: Vec3,
-    tex_coord: Vec2,
-    normal: Vec3,
-    tangent: Vec4
+    // position: z.Vector3(u16),
+    // texcoord: z.Vector2(u16),
+    // normal: z.Vector3(i8),
+    // tangent: z.Vector4(i8),
+
+    position: z.Vector3(f32),
+    texcoord: z.Vector2(f32),
+    normal: z.Vector3(f32),
+    tangent: z.Vector4(f32),
+    pub fn format(component: anytype) vk.Format {
+        return switch (component) {
+            // .position => .r16g16b16_unorm,
+            // .texcoord => .r16g16_unorm,
+            // .normal => .r8g8b8_snorm,
+            // .tangent => .r8g8b8a8_snorm,
+
+            .position => .r32g32b32_sfloat,
+            .texcoord => .r32g32_sfloat,
+            .normal => .r32g32b32_sfloat,
+            .tangent => .r32g32b32a32_sfloat,
+        };
+    }
+
+    pub fn accessorType(comptime at: cgltf.AttributeType) cgltf.Type {
+        return switch (at) {
+            .position => .vec3,
+            .texcoord => .vec2,
+            .normal => .vec3,
+            .tangent => .vec4,
+            else => unreachable,
+        };
+    }
+
+    pub fn componentType(comptime at: cgltf.AttributeType) cgltf.ComponentType {
+        return switch (at) {
+            .position => .r_32f,
+            .texcoord => .r_32f,
+            .normal => .r_32f,
+            .tangent => .r_32f,
+
+            // .position => .r_16u,
+            // .texcoord => .r_16u,
+            // .normal => .r_8,
+            // .tangent => .r_8,
+
+            else => unreachable,
+        };
+    }
+
+    pub fn hasComponent(comptime at: cgltf.AttributeType) bool {
+        return switch (at) {
+            .position => true,
+            .texcoord => true,
+            .normal => true,
+            .tangent => true,
+            else => false,
+        };
+    }
 });
 
 const app_name = "vulkan + glfw";
@@ -66,7 +120,6 @@ const Light = struct {
     }
 };
 
-
 const PushConstant = struct {
     base_color_id: u32,
     normal_id: u32 = 0,
@@ -79,7 +132,7 @@ allocator: std.mem.Allocator,
 window: Window,
 timer: std.time.Timer,
 indices: std.ArrayList(u32),
-vertices: Vertex.ArrayList,
+vertices: Vertex.MultiArrayList,
 meshs: std.ArrayList(Mesh),
 gc: GraphicsContext,
 swapchain: Swapchain,
@@ -110,20 +163,22 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ********** load Model **********
     self.indices = std.ArrayList(u32).init(allocator);
-    self.vertices = Vertex.ArrayList{};
+    self.vertices = Vertex.MultiArrayList{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet.gltf");
+    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet.gltf");
     self.viking_room = Model{
         .mesh_begin = 0,
         .mesh_end = @truncate(u32, self.meshs.items.len),
     };
-    appendGltfModel(allocator, arena.allocator(), &self.meshs, &self.vertices, &self.indices, "assets/cube.gltf");
+    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/cube.gltf");
     self.cube = Model{
         .mesh_begin = self.viking_room.mesh_end,
         .mesh_end = @truncate(u32, self.meshs.items.len),
     };
-    arena.deinit();
+    // self.cube = Model{
+    //     .mesh_begin = 0,
+    //     .mesh_end = @truncate(u32, self.meshs.items.len),
+    // };
     //*********************************
 
     self.gc = try GraphicsContext.init(allocator, app_name, self.window.window);
@@ -138,7 +193,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         resources.triangle_vert,
         "main",
-        .{ .vertex = Vertex.inputDescription(&.{ .position, .tex_coord, .normal, .tangent }) },
+        .{ .vertex = Vertex.inputDescription(&.{ .position, .texcoord, .normal, .tangent }) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
@@ -584,60 +639,42 @@ fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebu
 }
 
 pub fn appendGltfModel(
-    base_allocator: Allocator,
-    arena: Allocator,
+    allocator: Allocator,
     all_meshes: *std.ArrayList(Mesh),
-    all_vertices: *Vertex.ArrayList,
+    all_vertices: *Vertex.MultiArrayList,
     all_indices: *std.ArrayList(u32),
     path: [:0]const u8,
 ) void {
-    var indices = std.ArrayList(u32).init(arena);
-    var positions = std.ArrayList(Vec3).init(arena);
-    var normals = std.ArrayList(Vec3).init(arena);
-    var texcoords0 = std.ArrayList(Vec2).init(arena);
-    var tangents = std.ArrayList(Vec4).init(arena);
-
     const data = parseAndLoadGltfFile(path);
     defer cgltf.cgltf_free(data);
 
+    var current_indices_index = @truncate(u32, all_indices.items.len);
+    var current_vertex_index = @truncate(u32, all_vertices.len);
+
+    all_vertices.resize(allocator, all_vertices.len + data.accessors[0].count) catch unreachable;
+    var slice = all_vertices.slice();
+
     const num_meshes = @truncate(u32, data.meshes_count);
     var mesh_index: u32 = 0;
-    const base_indices = @truncate(u32, all_indices.items.len);
-    const base_vertices = @truncate(u32, all_vertices.len);
-
     while (mesh_index < num_meshes) : (mesh_index += 1) {
         const num_prims = @intCast(u32, data.meshes[mesh_index].primitives_count);
         var prim_index: u32 = 0;
 
         while (prim_index < num_prims) : (prim_index += 1) {
-            const pre_indices_len = indices.items.len;
-            const pre_positions_len = positions.items.len;
+            const mesh = appendMeshPrimitive(
+                data,
+                mesh_index,
+                prim_index,
+                current_indices_index,
+                current_vertex_index,
+                all_indices,
+                slice,
+            );
 
-            appendMeshPrimitive(data, mesh_index, prim_index, &indices, &positions, &normals, &texcoords0, &tangents);
-
-            all_meshes.append(.{
-                .index_offset = @intCast(u32, base_indices + pre_indices_len),
-                .vertex_offset = @intCast(i32, base_vertices + pre_positions_len),
-                .num_indices = @intCast(u32, indices.items.len - pre_indices_len),
-                .num_vertices = @intCast(u32, positions.items.len - pre_positions_len),
-            }) catch unreachable;
+            all_meshes.append(mesh) catch unreachable;
+            current_vertex_index += mesh.num_vertices;
+            current_indices_index += mesh.num_indices;
         }
-    }
-
-    all_indices.ensureTotalCapacity(indices.items.len) catch unreachable;
-    for (indices.items) |index| {
-        all_indices.appendAssumeCapacity(index);
-    }
-
-    all_vertices.ensureTotalCapacity(base_allocator, positions.items.len) catch unreachable;
-    for (positions.items) |_, index| {
-        all_vertices.appendAssumeCapacity(.{
-            // .position = positions.items[index].scale(0.2), // NOTE(mziulek): Sponza requires scaling.
-            .position = positions.items[index],
-            .normal = normals.items[index],
-            .tex_coord = texcoords0.items[index],
-            .tangent = tangents.items[index],
-        });
     }
 }
 
@@ -655,26 +692,35 @@ fn parseAndLoadGltfFile(gltf_path: [:0]const u8) *cgltf.Data {
     }
     return data;
 }
+
+const VertexAdded = struct {
+    indices: u32,
+    vertices: u32,
+};
 fn appendMeshPrimitive(
     data: *cgltf.Data,
     mesh_index: u32,
     prim_index: u32,
+    current_indices_index: u32,
+    current_vertex_index: u32,
     indices: *std.ArrayList(u32),
-    positions: *std.ArrayList(Vec3),
-    normals: ?*std.ArrayList(Vec3),
-    texcoords0: ?*std.ArrayList(Vec2),
-    tangents: ?*std.ArrayList(Vec4),
-) void {
+    slice: Vertex.MultiArrayList.Slice,
+) Mesh {
     assert(mesh_index < data.meshes_count);
+    const meshes = data.getMeshes();
+
     assert(prim_index < data.meshes[mesh_index].primitives_count);
-    const num_vertices: u32 = @intCast(u32, data.meshes[mesh_index].primitives[prim_index].attributes[0].data.count);
-    const num_indices: u32 = @intCast(u32, data.meshes[mesh_index].primitives[prim_index].indices.?.count);
+    const primitives = meshes[mesh_index].getPrimitives();
+
+    const attributes = primitives[prim_index].getAttribute();
+
+    const num_vertices = @truncate(u32, attributes[0].data.count);
+    const num_indices = @truncate(u32, primitives[prim_index].indices.?.count);
 
     // Indices.
     {
-        indices.ensureTotalCapacity(indices.items.len + num_indices) catch unreachable;
-
-        const accessor = data.meshes[mesh_index].primitives[prim_index].indices.?;
+        indices.ensureTotalCapacity(current_indices_index + num_indices) catch unreachable;
+        const accessor = primitives[prim_index].indices.?;
 
         const buffer_view = accessor.buffer_view.?;
         assert(accessor.stride == buffer_view.stride or buffer_view.stride == 0);
@@ -683,87 +729,100 @@ fn appendMeshPrimitive(
         const data_addr = @alignCast(4, @ptrCast([*]const u8, buffer_view.buffer.data.?) +
             accessor.offset + buffer_view.offset);
 
-        if (accessor.stride == 1) {
-            assert(accessor.component_type == .r_8u);
-            const src = @ptrCast([*]const u8, data_addr);
-            var i: u32 = 0;
-            while (i < num_indices) : (i += 1) {
-                indices.appendAssumeCapacity(src[i]);
-            }
-        } else if (accessor.stride == 2) {
-            assert(accessor.component_type == .r_16u);
-            const src = @ptrCast([*]const u16, data_addr);
-            var i: u32 = 0;
-            while (i < num_indices) : (i += 1) {
-                indices.appendAssumeCapacity(src[i]);
-            }
-        } else if (accessor.stride == 4) {
-            assert(accessor.component_type == .r_32u);
-            const src = @ptrCast([*]const u32, data_addr);
-            var i: u32 = 0;
-            while (i < num_indices) : (i += 1) {
-                indices.appendAssumeCapacity(src[i]);
-            }
-        } else {
-            unreachable;
+        switch (accessor.component_type) {
+            .r_8u => {
+                assert(accessor.stride == 1);
+                const src = @ptrCast([*]const u8, data_addr);
+                var i: u32 = 0;
+                while (i < num_indices) : (i += 1) {
+                    indices.appendAssumeCapacity(src[i]);
+                }
+            },
+            .r_16u => {
+                assert(accessor.stride == 2);
+                const src = @ptrCast([*]const u16, data_addr);
+                var i: u32 = 0;
+                while (i < num_indices) : (i += 1) {
+                    indices.appendAssumeCapacity(src[i]);
+                }
+            },
+            .r_32u => {
+                assert(accessor.stride == 4);
+                const src = @ptrCast([*]const u32, data_addr);
+                var i: u32 = 0;
+                while (i < num_indices) : (i += 1) {
+                    indices.appendAssumeCapacity(src[i]);
+                }
+            },
+            else => unreachable,
         }
     }
 
     // Attributes.
-    {
-        positions.resize(positions.items.len + num_vertices) catch unreachable;
-        if (normals != null) normals.?.resize(normals.?.items.len + num_vertices) catch unreachable;
-        if (texcoords0 != null) texcoords0.?.resize(texcoords0.?.items.len + num_vertices) catch unreachable;
-        if (tangents != null) tangents.?.resize(tangents.?.items.len + num_vertices) catch unreachable;
+    const end_vertex_index = current_vertex_index + num_vertices;
 
-        const num_attribs: u32 = @truncate(u32, data.meshes[mesh_index].primitives[prim_index].attributes_count);
+    for (attributes) |attrib| {
+        const accessor = attrib.data;
 
-        var attrib_index: u32 = 0;
-        while (attrib_index < num_attribs) : (attrib_index += 1) {
-            const attrib = &data.meshes[mesh_index].primitives[prim_index].attributes[attrib_index];
-            const accessor = attrib.data;
+        const buffer_view = accessor.buffer_view.?;
+        assert(accessor.stride == buffer_view.stride or buffer_view.stride == 0);
+        assert((accessor.stride * accessor.count) == buffer_view.size);
 
-            const buffer_view = accessor.buffer_view.?;
-            assert(accessor.stride == buffer_view.stride or buffer_view.stride == 0);
-            assert((accessor.stride * accessor.count) == buffer_view.size);
+        const data_addr = @ptrCast([*]const u8, buffer_view.buffer.data.?) +
+            accessor.offset + buffer_view.offset;
 
-            const data_addr = @ptrCast([*]const u8, buffer_view.buffer.data.?) +
-                accessor.offset + buffer_view.offset;
+        switch (attrib.type) {
+            .position => if (Vertex.hasComponent(.position)) {
+                assert(accessor.type == Vertex.accessorType(.position));
+                assert(accessor.component_type == Vertex.componentType(.position));
 
-            if (attrib.type == .position) {
-                assert(accessor.type == .vec3);
-                assert(accessor.component_type == .r_32f);
+                var buffer = slice.items(.position)[current_vertex_index..end_vertex_index];
                 @memcpy(
-                    @ptrCast([*]u8, &positions.items[positions.items.len - num_vertices]),
+                    @ptrCast([*]u8, buffer.ptr),
                     data_addr,
                     accessor.count * accessor.stride,
                 );
-            } else if (attrib.type == .normal and normals != null) {
-                assert(accessor.type == .vec3);
-                assert(accessor.component_type == .r_32f);
+            },
+            .normal => if (Vertex.hasComponent(.normal)) {
+                assert(accessor.type == Vertex.accessorType(.normal));
+                assert(accessor.component_type == Vertex.componentType(.normal));
+
+                var buffer = slice.items(.normal)[current_vertex_index..end_vertex_index];
                 @memcpy(
-                    @ptrCast([*]u8, &normals.?.items[normals.?.items.len - num_vertices]),
+                    @ptrCast([*]u8, buffer.ptr),
                     data_addr,
                     accessor.count * accessor.stride,
                 );
-            } else if (attrib.type == .texcoord and texcoords0 != null) {
-                assert(accessor.type == .vec2);
-                assert(accessor.component_type == .r_32f);
+            },
+            .tangent => if (Vertex.hasComponent(.tangent)) {
+                assert(accessor.type == Vertex.accessorType(.tangent));
+                assert(accessor.component_type == Vertex.componentType(.tangent));
+
+                var buffer = slice.items(.tangent)[current_vertex_index..end_vertex_index];
                 @memcpy(
-                    @ptrCast([*]u8, &texcoords0.?.items[texcoords0.?.items.len - num_vertices]),
+                    @ptrCast([*]u8, buffer.ptr),
                     data_addr,
                     accessor.count * accessor.stride,
                 );
-            }
-            else if (attrib.type == .tangent and tangents != null) {
-                assert(accessor.type == .vec4);
-                assert(accessor.component_type == .r_32f);
+            },
+            .texcoord => if (Vertex.hasComponent(.texcoord)) {
+                assert(accessor.type == Vertex.accessorType(.texcoord));
+                assert(accessor.component_type == Vertex.componentType(.texcoord));
+
+                var buffer = slice.items(.texcoord)[current_vertex_index..end_vertex_index];
                 @memcpy(
-                    @ptrCast([*]u8, &tangents.?.items[tangents.?.items.len - num_vertices]),
+                    @ptrCast([*]u8, buffer.ptr),
                     data_addr,
                     accessor.count * accessor.stride,
                 );
-            }
+            },
+            else => std.log.info("Parse gltf: not using {s}", .{@tagName(attrib.type)}),
         }
     }
+    return .{
+        .index_offset = current_indices_index,
+        .vertex_offset = @intCast(i32, current_vertex_index),
+        .num_indices = num_indices,
+        .num_vertices = num_vertices,
+    };
 }

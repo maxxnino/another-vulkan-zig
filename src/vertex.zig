@@ -4,10 +4,6 @@ const vma = @import("binding/vma.zig");
 const builtin = @import("builtin");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const VulkanBuffer = @import("Buffer.zig");
-const z = @import("zalgebra");
-const Vec3 = z.Vec3;
-const Vec2 = z.Vec2;
-const Vec4 = z.Vec4;
 
 pub const VertexInputDescription = struct {
     binding: []const vk.VertexInputBindingDescription,
@@ -17,9 +13,12 @@ pub const VertexInputDescription = struct {
 pub fn VertexGen(comptime Vertex: type) type {
     return struct {
         const Self = @This();
-        pub const ArrayList = std.MultiArrayList(Vertex);
+        pub const MultiArrayList = std.MultiArrayList(Vertex);
+        pub const accessorType = Vertex.accessorType;
+        pub const componentType = Vertex.componentType;
+        pub const hasComponent = Vertex.hasComponent;
 
-        const Component = ArrayList.Field;
+        const Component = MultiArrayList.Field;
         pub fn inputDescription(comptime components: []const Component) VertexInputDescription {
             comptime var bd: [components.len]vk.VertexInputBindingDescription = undefined;
             comptime var ad: [components.len]vk.VertexInputAttributeDescription = undefined;
@@ -32,7 +31,7 @@ pub fn VertexGen(comptime Vertex: type) type {
 
                 ad[i].binding = location;
                 ad[i].location = location;
-                ad[i].format = comptime toFormat(ComponentType);
+                ad[i].format = comptime Vertex.format(component);
                 ad[i].offset = 0;
             }
             return .{
@@ -49,7 +48,7 @@ pub fn VertexGen(comptime Vertex: type) type {
             buffers: [component_fields.len]VulkanBuffer,
             bind_buffer: [component_fields.len]vk.Buffer,
 
-            pub fn init(gc: GraphicsContext, slice: ArrayList.Slice, label: ?[*:0]const u8) !Buffer {
+            pub fn init(gc: GraphicsContext, slice: MultiArrayList.Slice, label: ?[*:0]const u8) !Buffer {
                 var self: Buffer = undefined;
 
                 inline for (component_fields) |field, i| {
@@ -86,12 +85,4 @@ pub fn VertexGen(comptime Vertex: type) type {
             return std.meta.fieldInfo(Vertex, component).field_type;
         }
     };
-}
-
-fn toFormat(comptime T: type) vk.Format {
-    if (T == Vec3) return .r32g32b32_sfloat;
-    if (T == Vec2) return .r32g32_sfloat;
-    if (T == Vec4) return .r32g32b32a32_sfloat;
-
-    @compileError("Not support field with type: " ++ @typeName(T));
 }
