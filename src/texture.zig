@@ -7,8 +7,14 @@ const StbImage = @import("binding/stb_image.zig").StbImage;
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 
 pub const TextureType = enum {
+    /// photos/albedo textures
+    srgb,
+
+    /// for normal, metallic, ao roughness
+    unorm,
+
+    /// cube_map always in srgb space
     cube_map,
-    texture,
 };
 
 pub const Texture = struct {
@@ -44,7 +50,7 @@ pub const Texture = struct {
         defer stage_buffer.deinit(gc);
         try stage_buffer.upload(u8, gc, buffer);
         const width = switch (@"type") {
-            .texture => in_width,
+            .srgb, .unorm => in_width,
             .cube_map => in_width / 6,
         };
         const height = in_height;
@@ -208,10 +214,20 @@ pub const Texture = struct {
         return loadFromMemory(gc, @"type", image.pixels, image.width, image.height, image.channels, config, filename);
     }
 
-    pub fn loadCompressFromFile(gpa: std.mem.Allocator, gc: GraphicsContext, filename: [*:0]const u8) !Texture {
+    pub fn loadCompressFromFile(
+        gpa: std.mem.Allocator,
+        gc: GraphicsContext,
+        texture_type: TextureType,
+        filename: [*:0]const u8,
+    ) !Texture {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         const allocator = arena.allocator();
+
+        const format: vk.Format = switch (texture_type) {
+            .srgb, .cube_map => .bc7_srgb_block,
+            .unorm => .bc7_unorm_block,
+        };
 
         var texture: Texture = undefined;
         const file = try std.fs.cwd().openFileZ(filename, .{});
@@ -284,7 +300,7 @@ pub const Texture = struct {
                 texture.image = try Image.init(gc, .{
                     .flags = .{},
                     .image_type = .@"2d",
-                    .format = .bc7_srgb_block,
+                    .format = format,
                     .extent = .{
                         .width = ii.width,
                         .height = ii.height,
@@ -329,7 +345,7 @@ pub const Texture = struct {
                     texture.image.image,
                     .transfer_dst_optimal,
                     ii.total_levels,
-                    &bics,
+                    bics.ptr,
                 );
                 texture.image.changeLayout(
                     gc,
@@ -348,7 +364,7 @@ pub const Texture = struct {
                     .flags = .{},
                     .image = texture.image.image,
                     .view_type = .@"2d",
-                    .format = texture.image.format,
+                    .format = format,
                     .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
                     .subresource_range = .{
                         .aspect_mask = .{ .color_bit = true },

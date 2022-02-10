@@ -242,30 +242,31 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     const frame_size = @truncate(u32, self.framebuffers.len);
     self.textures = [_]Texture{
-        try Texture.loadFromMemory(self.gc, .texture, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
+        try Texture.loadFromMemory(self.gc, .srgb, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
+            .srgb,
             "assets/SciFiHelmet/SciFiHelmet_BaseColor.basis",
         ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
-            // .texture,
+            .unorm,
             "assets/SciFiHelmet/SciFiHelmet_Normal.basis",
             // .{ .anisotropy = true, .mip_map = true },
         ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
-            // .texture,
+            .unorm,
             "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.basis",
             // .{ .anisotropy = true, .mip_map = true },
         ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
-            // .texture,
+            .unorm,
             "assets/SciFiHelmet/SciFiHelmet_AmbientOcclusion.basis",
             // .{ .anisotropy = true, .mip_map = true },
         ),
