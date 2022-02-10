@@ -208,89 +208,61 @@ pub const Texture = struct {
         return loadFromMemory(gc, @"type", image.pixels, image.width, image.height, image.channels, config, filename);
     }
 
-    pub fn loadCompressFromFile(allocator: std.mem.Allocator, gc: GraphicsContext, filename: [*:0]const u8) !Texture {
+    pub fn loadCompressFromFile(gpa: std.mem.Allocator, gc: GraphicsContext, filename: [*:0]const u8) !Texture {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+
         var texture: Texture = undefined;
         const file = try std.fs.cwd().openFileZ(filename, .{});
         defer file.close();
         const data = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
-        defer allocator.free(data);
         const data_len = @truncate(u32, data.len);
 
         basisu.start(data.ptr, data_len);
         const total_image = basisu.totalImages(data.ptr, data_len);
         std.log.info("total image: {}", .{total_image});
+
+        const bytes_per_block = basisu.bytesPerBlock(.bc7_rgba);
+        // only support 1 image for now
+        std.debug.assert(total_image == 1);
         {
             var i: u32 = 0;
             while (i < total_image) : (i += 1) {
                 const ii = basisu.imageInfo(data.ptr, data_len, i);
                 std.log.info("{}", .{ii});
+
+                var buffer = try allocator.alloc(u8, basisu.getTotalBlock(ii) * bytes_per_block);
+                const stage_buffer = try Buffer.init(gc, .{
+                    .size = buffer.len,
+                    .buffer_usage = .{ .transfer_src_bit = true },
+                    .memory_usage = .cpu_to_gpu,
+                    .memory_flags = .{},
+                }, filename);
+                defer stage_buffer.deinit(gc);
+
                 var j: u32 = 0;
+
+                var bics = try allocator.alloc(vk.BufferImageCopy, ii.total_levels);
+
+                var buffer_offset: u32 = 0;
                 while (j < ii.total_levels) : (j += 1) {
                     const li = basisu.imageLevelInfo(data.ptr, data_len, i, j);
-                    const total_bytes = li.total_blocks * basisu.bytesPerBlock(.bc7_rgba);
-                    var buffer = try allocator.alloc(u8, total_bytes);
-                    defer allocator.free(buffer);
-                    std.debug.assert(basisu.transcodeImageLevel(data.ptr, data_len, &li, @ptrCast(*anyopaque, buffer.ptr), .bc7_rgba));
-
-                    const stage_buffer = try Buffer.init(gc, .{
-                        .size = buffer.len,
-                        .buffer_usage = .{ .transfer_src_bit = true },
-                        .memory_usage = .cpu_to_gpu,
-                        .memory_flags = .{},
-                    }, filename);
-                    defer stage_buffer.deinit(gc);
-                    try stage_buffer.upload(u8, gc, buffer);
-
-                    texture.image = try Image.init(gc, .{
-                        .flags = .{},
-                        .image_type = .@"2d",
-                        .format = .bc7_srgb_block,
-                        .extent = .{
-                            .width = li.width,
-                            .height = li.height,
-                            .depth = 1,
-                        },
-                        .mip_levels = 1,
-                        .array_layers = 1,
-                        .samples = .{ .@"1_bit" = true },
-                        .tiling = .optimal,
-                        .usage = .{
-                            .transfer_dst_bit = true,
-                            .sampled_bit = true,
-                        },
-                        .memory_usage = .gpu_only,
-                        .memory_flags = .{},
-                    }, filename);
-                    var subresource_range = vk.ImageSubresourceRange{
-                        .aspect_mask = .{ .color_bit = true },
-                        .base_mip_level = 0,
-                        // Only copy to the first mip map level,
-                        .level_count = 1,
-                        .base_array_layer = 0,
-                        .layer_count = 1,
-                    };
-
-                    const cmdbuf = try gc.beginOneTimeCommandBuffer();
-                    // Optimal image will be used as destination for the copy, so we must transfer from
-                    // our initial undefined image layout to the transfer destination layout
-                    texture.image.changeLayout(
-                        gc,
-                        cmdbuf,
-                        .@"undefined",
-                        .transfer_dst_optimal,
-                        comptime Image.accessMaskFrom(.@"undefined", .transfer_dst_optimal),
-                        .{},
-                        .{ .all_transfer_bit_khr = true },
-                        subresource_range,
-                    );
-                    // Copy the first mip of the chain, remaining mips will be generated if needed
-                    const bic = [_]vk.BufferImageCopy{.{
-                        .buffer_offset = 0,
+                    const total_bytes = li.total_blocks * bytes_per_block;
+                    std.debug.assert(basisu.transcodeImageLevel(
+                        data.ptr,
+                        data_len,
+                        &li,
+                        @ptrCast(*anyopaque, buffer[buffer_offset .. buffer_offset + total_bytes].ptr),
+                        .bc7_rgba,
+                    ));
+                    bics[j] = .{
+                        .buffer_offset = buffer_offset,
                         .buffer_row_length = 0,
                         .buffer_image_height = 0,
                         .image_subresource = .{
                             .aspect_mask = .{ .color_bit = true },
-                            .mip_level = 0,
+                            .mip_level = j,
                             .base_array_layer = 0,
                             .layer_count = 1,
                         },
@@ -304,46 +276,90 @@ pub const Texture = struct {
                             .height = li.height,
                             .depth = 1,
                         },
-                    }};
-
-                    gc.vkd.cmdCopyBufferToImage(
-                        cmdbuf,
-                        stage_buffer.buffer,
-                        texture.image.image,
-                        .transfer_dst_optimal,
-                        bic.len,
-                        &bic,
-                    );
-                    texture.image.changeLayout(
-                        gc,
-                        cmdbuf,
-                        .transfer_dst_optimal,
-                        .shader_read_only_optimal,
-                        comptime Image.accessMaskFrom(.transfer_dst_optimal, .shader_read_only_optimal),
-                        .{ .all_transfer_bit_khr = true },
-                        .{ .fragment_shader_bit_khr = true },
-                        subresource_range,
-                    );
-
-                    try gc.endOneTimeCommandBuffer(cmdbuf);
-
-                    texture.view = try gc.create(vk.ImageViewCreateInfo{
-                        .flags = .{},
-                        .image = texture.image.image,
-                        .view_type = .@"2d",
-                        .format = texture.image.format,
-                        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-                        .subresource_range = .{
-                            .aspect_mask = .{ .color_bit = true },
-                            .base_mip_level = 0,
-                            .level_count = 1,
-                            .base_array_layer = 0,
-                            .layer_count = 1,
-                        },
-                    }, filename);
-
-                    return texture;
+                    };
+                    buffer_offset += total_bytes;
                 }
+                try stage_buffer.upload(u8, gc, buffer);
+
+                texture.image = try Image.init(gc, .{
+                    .flags = .{},
+                    .image_type = .@"2d",
+                    .format = .bc7_srgb_block,
+                    .extent = .{
+                        .width = ii.width,
+                        .height = ii.height,
+                        .depth = 1,
+                    },
+                    .mip_levels = ii.total_levels,
+                    .array_layers = 1,
+                    .samples = .{ .@"1_bit" = true },
+                    .tiling = .optimal,
+                    .usage = .{
+                        .transfer_dst_bit = true,
+                        .sampled_bit = true,
+                    },
+                    .memory_usage = .gpu_only,
+                    .memory_flags = .{},
+                }, filename);
+                var subresource_range = vk.ImageSubresourceRange{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = ii.total_levels,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                };
+
+                const cmdbuf = try gc.beginOneTimeCommandBuffer();
+                // Optimal image will be used as destination for the copy, so we must transfer from
+                // our initial undefined image layout to the transfer destination layout
+                texture.image.changeLayout(
+                    gc,
+                    cmdbuf,
+                    .@"undefined",
+                    .transfer_dst_optimal,
+                    comptime Image.accessMaskFrom(.@"undefined", .transfer_dst_optimal),
+                    .{},
+                    .{ .all_transfer_bit_khr = true },
+                    subresource_range,
+                );
+
+                gc.vkd.cmdCopyBufferToImage(
+                    cmdbuf,
+                    stage_buffer.buffer,
+                    texture.image.image,
+                    .transfer_dst_optimal,
+                    ii.total_levels,
+                    &bics,
+                );
+                texture.image.changeLayout(
+                    gc,
+                    cmdbuf,
+                    .transfer_dst_optimal,
+                    .shader_read_only_optimal,
+                    comptime Image.accessMaskFrom(.transfer_dst_optimal, .shader_read_only_optimal),
+                    .{ .all_transfer_bit_khr = true },
+                    .{ .fragment_shader_bit_khr = true },
+                    subresource_range,
+                );
+
+                try gc.endOneTimeCommandBuffer(cmdbuf);
+
+                texture.view = try gc.create(vk.ImageViewCreateInfo{
+                    .flags = .{},
+                    .image = texture.image.image,
+                    .view_type = .@"2d",
+                    .format = texture.image.format,
+                    .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+                    .subresource_range = .{
+                        .aspect_mask = .{ .color_bit = true },
+                        .base_mip_level = 0,
+                        .level_count = ii.total_levels,
+                        .base_array_layer = 0,
+                        .layer_count = 1,
+                    },
+                }, filename);
+
+                return texture;
             }
         }
         unreachable;

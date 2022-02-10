@@ -152,8 +152,11 @@ pub const GraphicsContext = struct {
         self.pdev = candidate.pdev;
         self.props = candidate.props;
         self.feature = candidate.feature;
-        // check if physical device suport BC7 compression
+        // check if physical device suport BC7 compression for albedo image
         std.debug.assert(isFormatSupport(self.vki, self.pdev, .bc7_srgb_block));
+
+        // check if physical device suport BC7 compression for normal, metallic, ao..
+        std.debug.assert(isFormatSupport(self.vki, self.pdev, .bc7_unorm_block));
 
         self.dev = try initializeCandidate(self.vki, candidate);
         self.vkd = try DeviceDispatch.load(self.dev, self.vki.dispatch.vkGetDeviceProcAddr);
