@@ -294,45 +294,45 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .{ .anisotropy = true, .mip_map = true },
         ),
     };
-    //     const skybox_vert = try Shader.createFromMemory(
-    //         self.gc,
-    //         resources.skybox_vert,
-    //         "main",
-    //         .{ .vertex = Vertex.inputDescription(&.{.position}) },
-    //         &[_]Shader.DescriptorBindingLayout{.{
-    //             .binding = 0,
-    //             .descriptor_type = .uniform_buffer,
-    //         }},
-    //         srcToString(@src()),
-    //     );
-    //     defer skybox_vert.deinit(self.gc);
+    const skybox_vert = try Shader.createFromFile(
+        self.gc,
+        allocator,
+        "zig-cache/shaders/shaders/texturecubemap/skybox.vert.spv",
+        "main",
+        .{ .vertex = Vertex.inputDescription(&.{.position}) },
+        &[_]Shader.DescriptorBindingLayout{.{
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
+        }},
+    );
+    defer skybox_vert.deinit(self.gc);
 
-    //     const skybox_frag = try Shader.createFromFile(
-    //         self.gc,
-    //         allocator,
-    //         "zig-cache/shaders/shaders/texturecubemap/skybox.vert.spv",
-    //         "main",
-    //         .{ .fragment = {} },
-    //         &[_]Shader.DescriptorBindingLayout{.{
-    //             .binding = 0,
-    //             .descriptor_type = .uniform_buffer,
-    //         }},
-    //     );
-    //     defer skybox_frag.deinit(self.gc);
+    const skybox_frag = try Shader.createFromFile(
+        self.gc,
+        allocator,
+        "zig-cache/shaders/shaders/texturecubemap/skybox.frag.spv",
+        "main",
+        .{ .fragment = {} },
+        &[_]Shader.DescriptorBindingLayout{.{
+            .binding = 0,
+            .descriptor_type = .uniform_buffer,
+        }},
+    );
+    defer skybox_frag.deinit(self.gc);
 
-    //     var skybox_binding = ShaderBinding.init(allocator);
-    //     defer skybox_binding.deinit();
-    //     try skybox_binding.addShader(skybox_vert);
-    //     try skybox_binding.addShader(skybox_frag);
+    var skybox_binding = ShaderBinding.init(allocator);
+    defer skybox_binding.deinit();
+    try skybox_binding.addShader(skybox_vert);
+    try skybox_binding.addShader(skybox_frag);
 
-    //     self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
-    //         self.gc,
-    //         self.renderer.render_pass,
-    //         skybox_binding,
-    //         &push_constant,
-    //         .{},
-    //         "skybox " ++ srcToString(@src()),
-    //     );
+    self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
+        self.gc,
+        self.renderer.render_pass,
+        skybox_binding,
+        &push_constant,
+        .{},
+        "skybox " ++ srcToString(@src()),
+    );
     // ============================================
     self.camera = Camera{
         .pitch = 270,
@@ -560,15 +560,15 @@ pub fn run(self: *Self) !void {
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 
             //draw skybox
-            // self.skybox_pipeline.bind(self.gc, cmdbuf);
-            // self.skybox_pipeline.pushConstant(
-            //     self.gc,
-            //     cmdbuf,
-            //     .{ .fragment_bit = true },
-            //     self.skybox_push_constant,
-            //     // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
-            // );
-            // self.cube.draw(self.gc, cmdbuf, self.meshs.items);
+            self.skybox_pipeline.bind(self.gc, cmdbuf);
+            self.skybox_pipeline.pushConstant(
+                self.gc,
+                cmdbuf,
+                .{ .fragment_bit = true },
+                self.skybox_push_constant,
+                // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
+            );
+            self.cube.draw(self.gc, cmdbuf, self.meshs.items);
             try self.renderer.endFrame(self.gc, cmdbuf);
         }
 

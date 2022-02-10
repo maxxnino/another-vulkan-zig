@@ -29,11 +29,10 @@ pub fn createFromMemory(
 ) !Self {
     // verifyBinding(allocator, bindings_info);
     var shader: Self = undefined;
-
     shader.module = try gc.create(vk.ShaderModuleCreateInfo{
         .flags = .{},
         .code_size = buffer.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(@alignOf(u32), buffer.ptr)),
+        .p_code = @ptrCast([*]const u32, @alignCast(@alignOf(u32), buffer)),
     }, label);
     shader.stage = stage;
     shader.entry = entry;
@@ -45,8 +44,8 @@ pub fn createFromFile(
     gc: GraphicsContext,
     allocator: std.mem.Allocator,
     file_path: [*:0]const u8,
-    stage: Stage,
     entry: [*:0]const u8,
+    stage: Stage,
     layouts: []const DescriptorBindingLayout,
 ) !Self {
     const file = try std.fs.cwd().openFileZ(file_path, .{});
@@ -54,7 +53,7 @@ pub fn createFromFile(
 
     const buffer = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
     defer allocator.free(buffer);
-    return try createFromMemory(gc, buffer, stage, entry, layouts, file_path);
+    return try createFromMemory(gc, buffer, entry, stage, layouts, file_path);
 }
 
 pub fn deinit(self: Self, gc: GraphicsContext) void {
