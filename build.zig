@@ -135,10 +135,16 @@ pub fn build(b: *Builder) void {
 
     // single header file
     exe.linkLibCpp();
-    exe.addIncludeDir("libs");
+    exe.addIncludePath("libs");
     exe.addCSourceFile("libs/vk_mem_alloc.cpp", &.{"-std=c++14"});
     exe.addCSourceFile("libs/cgltf.c", &.{"-std=c99"});
     exe.addCSourceFile("libs/stb_image.c", &.{"-std=c99"});
+
+    //basisu
+    exe.addIncludePath("libs/basisu/transcoder");
+    exe.addIncludePath("libs/basisu");
+    exe.addCSourceFile("libs/basisu/transcoder/basisu_selected_feature.cpp", &.{"-std=c++14"});
+    exe.addCSourceFile("libs/basisu/c_transcoder.cpp", &.{"-std=c++14"});
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
