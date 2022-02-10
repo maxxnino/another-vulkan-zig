@@ -26,7 +26,7 @@ const instance_command = [_]vk.InstanceCommand{
     .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceCapabilitiesKHR,
     .getPhysicalDeviceQueueFamilyProperties,  .getPhysicalDeviceSurfaceSupportKHR,
     .getDeviceProcAddr,                       .getPhysicalDeviceFeatures,
-    .getPhysicalDeviceFeatures2,
+    .getPhysicalDeviceFeatures2,              .getPhysicalDeviceFormatProperties,
 } ++ instance_vma ++ if (enable_safety) instance_debug else [_]vk.InstanceCommand{};
 pub const InstanceDispatch = vk.InstanceWrapper(&instance_command);
 
@@ -105,6 +105,7 @@ const device_command = [_]vk.DeviceCommand{
     .cmdEndRenderPass,
     .cmdBeginRenderPass,
     .queueSubmit2KHR,
+    .queueSubmit,
     .cmdSetEvent2KHR,
     .cmdResetEvent2KHR,
     .cmdWaitEvents2KHR,

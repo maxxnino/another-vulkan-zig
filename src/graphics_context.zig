@@ -25,6 +25,7 @@ const required_instance_extensions = [_][*:0]const u8{
 const required_device_feature = vk.PhysicalDeviceFeatures{
     .sampler_anisotropy = vk.TRUE,
     .sample_rate_shading = vk.TRUE,
+    .texture_compression_bc = vk.TRUE,
 };
 
 const required_instance_layers = [_][*:0]const u8{
@@ -46,6 +47,7 @@ pub const GraphicsContext = struct {
     surface: vk.SurfaceKHR,
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
+    feature: vk.PhysicalDeviceFeatures,
     mem_props: vk.PhysicalDeviceMemoryProperties,
     pool: vk.CommandPool,
 
@@ -53,6 +55,7 @@ pub const GraphicsContext = struct {
     graphics_queue: Queue,
     present_queue: Queue,
     allocator: vma.Allocator,
+    support_format: vk.Format,
     debug_message: if (enable_safety) vk.DebugUtilsMessengerEXT else void,
 
     immutable_samplers: vk.Sampler,
@@ -148,6 +151,10 @@ pub const GraphicsContext = struct {
         const candidate = try pickPhysicalDevice(self.vki, self.instance, allocator, self.surface);
         self.pdev = candidate.pdev;
         self.props = candidate.props;
+        self.feature = candidate.feature;
+        // check if physical device suport BC7 compression
+        std.debug.assert(isFormatSupport(self.vki, self.pdev, .bc7_srgb_block));
+
         self.dev = try initializeCandidate(self.vki, candidate);
         self.vkd = try DeviceDispatch.load(self.dev, self.vki.dispatch.vkGetDeviceProcAddr);
         try self.markHandle(self.dev, .device, srcToString(@src()));
@@ -404,6 +411,7 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
 const DeviceCandidate = struct {
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
+    feature: vk.PhysicalDeviceFeatures,
     queues: QueueAllocation,
 };
 
@@ -462,6 +470,7 @@ fn checkSuitable(
         return DeviceCandidate{
             .pdev = pdev,
             .props = props,
+            .feature = feature,
             .queues = allocation,
         };
     }
@@ -510,6 +519,14 @@ fn checkSurfaceSupport(vki: InstanceDispatch, pdev: vk.PhysicalDevice, surface: 
     _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(pdev, surface, &present_mode_count, null);
 
     return format_count > 0 and present_mode_count > 0;
+}
+
+fn isFormatSupport(vki: InstanceDispatch, p_dev: vk.PhysicalDevice, format: vk.Format) bool {
+    const fp = vki.getPhysicalDeviceFormatProperties(p_dev, format);
+    return fp.optimal_tiling_features.contains(.{
+        .sampled_image_bit = true,
+        .transfer_dst_bit = true,
+    });
 }
 
 fn checkExtensionSupport(

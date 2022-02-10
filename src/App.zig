@@ -24,12 +24,14 @@ const command_pool = @import("command_pool.zig");
 const DrawPool = command_pool.DrawPool;
 const assert = std.debug.assert;
 const z = @import("zalgebra");
+const basisu = @import("binding/basisu.zig");
 const Mat4 = z.Mat4;
 const Vec3 = z.Vec3;
 const Vec2 = z.Vec2;
 const Vec4 = z.Vec4;
 
 const Vertex = VertexGen(struct {
+    // TODO: add support for quantination mesh
     // position: z.Vector3(u16),
     // texcoord: z.Vector2(u16),
     // normal: z.Vector3(i8),
@@ -74,7 +76,6 @@ const Vertex = VertexGen(struct {
             // .texcoord => .r_16u,
             // .normal => .r_8,
             // .tangent => .r_8,
-
             else => unreachable,
         };
     }
@@ -159,6 +160,8 @@ light: Light,
 pub fn init(allocator: std.mem.Allocator) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
+    basisu.init();
+
     self.window = try Window.init(app_name, false, 800, 600);
 
     // ********** load Model **********
@@ -175,10 +178,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .mesh_begin = self.viking_room.mesh_end,
         .mesh_end = @truncate(u32, self.meshs.items.len),
     };
-    // self.cube = Model{
-    //     .mesh_begin = 0,
-    //     .mesh_end = @truncate(u32, self.meshs.items.len),
-    // };
     //*********************************
 
     self.gc = try GraphicsContext.init(allocator, app_name, self.window.window);
@@ -244,29 +243,31 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const frame_size = @truncate(u32, self.framebuffers.len);
     self.textures = [_]Texture{
         try Texture.loadFromMemory(self.gc, .texture, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
-            .texture,
-            "assets/SciFiHelmet/SciFiHelmet_BaseColor.png",
-            .{ .anisotropy = true, .mip_map = true },
+            "assets/SciFiHelmet/SciFiHelmet_BaseColor.basis",
         ),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
-            .texture,
-            "assets/SciFiHelmet/SciFiHelmet_Normal.png",
-            .{ .anisotropy = true, .mip_map = true },
+            // .texture,
+            "assets/SciFiHelmet/SciFiHelmet_Normal.basis",
+            // .{ .anisotropy = true, .mip_map = true },
         ),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
-            .texture,
-            "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.png",
-            .{ .anisotropy = true, .mip_map = true },
+            // .texture,
+            "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.basis",
+            // .{ .anisotropy = true, .mip_map = true },
         ),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
-            .texture,
-            "assets/SciFiHelmet/SciFiHelmet_AmbientOcclusion.png",
-            .{ .anisotropy = true, .mip_map = true },
+            // .texture,
+            "assets/SciFiHelmet/SciFiHelmet_AmbientOcclusion.basis",
+            // .{ .anisotropy = true, .mip_map = true },
         ),
     };
 
@@ -293,45 +294,45 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .{ .anisotropy = true, .mip_map = true },
         ),
     };
-    const skybox_vert = try Shader.createFromMemory(
-        self.gc,
-        resources.skybox_vert,
-        "main",
-        .{ .vertex = Vertex.inputDescription(&.{.position}) },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
-        srcToString(@src()),
-    );
-    defer skybox_vert.deinit(self.gc);
+    //     const skybox_vert = try Shader.createFromMemory(
+    //         self.gc,
+    //         resources.skybox_vert,
+    //         "main",
+    //         .{ .vertex = Vertex.inputDescription(&.{.position}) },
+    //         &[_]Shader.DescriptorBindingLayout{.{
+    //             .binding = 0,
+    //             .descriptor_type = .uniform_buffer,
+    //         }},
+    //         srcToString(@src()),
+    //     );
+    //     defer skybox_vert.deinit(self.gc);
 
-    const skybox_frag = try Shader.createFromMemory(
-        self.gc,
-        resources.skybox_frag,
-        "main",
-        .{ .fragment = {} },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
-        srcToString(@src()),
-    );
-    defer skybox_frag.deinit(self.gc);
+    //     const skybox_frag = try Shader.createFromFile(
+    //         self.gc,
+    //         allocator,
+    //         "zig-cache/shaders/shaders/texturecubemap/skybox.vert.spv",
+    //         "main",
+    //         .{ .fragment = {} },
+    //         &[_]Shader.DescriptorBindingLayout{.{
+    //             .binding = 0,
+    //             .descriptor_type = .uniform_buffer,
+    //         }},
+    //     );
+    //     defer skybox_frag.deinit(self.gc);
 
-    var skybox_binding = ShaderBinding.init(allocator);
-    defer skybox_binding.deinit();
-    try skybox_binding.addShader(skybox_vert);
-    try skybox_binding.addShader(skybox_frag);
+    //     var skybox_binding = ShaderBinding.init(allocator);
+    //     defer skybox_binding.deinit();
+    //     try skybox_binding.addShader(skybox_vert);
+    //     try skybox_binding.addShader(skybox_frag);
 
-    self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
-        self.gc,
-        self.renderer.render_pass,
-        skybox_binding,
-        &push_constant,
-        .{},
-        "skybox " ++ srcToString(@src()),
-    );
+    //     self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
+    //         self.gc,
+    //         self.renderer.render_pass,
+    //         skybox_binding,
+    //         &push_constant,
+    //         .{},
+    //         "skybox " ++ srcToString(@src()),
+    //     );
     // ============================================
     self.camera = Camera{
         .pitch = 270,
@@ -559,15 +560,15 @@ pub fn run(self: *Self) !void {
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 
             //draw skybox
-            self.skybox_pipeline.bind(self.gc, cmdbuf);
-            self.skybox_pipeline.pushConstant(
-                self.gc,
-                cmdbuf,
-                .{ .fragment_bit = true },
-                self.skybox_push_constant,
-                // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
-            );
-            self.cube.draw(self.gc, cmdbuf, self.meshs.items);
+            // self.skybox_pipeline.bind(self.gc, cmdbuf);
+            // self.skybox_pipeline.pushConstant(
+            //     self.gc,
+            //     cmdbuf,
+            //     .{ .fragment_bit = true },
+            //     self.skybox_push_constant,
+            //     // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
+            // );
+            // self.cube.draw(self.gc, cmdbuf, self.meshs.items);
             try self.renderer.endFrame(self.gc, cmdbuf);
         }
 
@@ -693,10 +694,6 @@ fn parseAndLoadGltfFile(gltf_path: [:0]const u8) *cgltf.Data {
     return data;
 }
 
-const VertexAdded = struct {
-    indices: u32,
-    vertices: u32,
-};
 fn appendMeshPrimitive(
     data: *cgltf.Data,
     mesh_index: u32,
