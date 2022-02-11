@@ -1,3 +1,16 @@
+/// the total_blocks in ImageInfo only for the first mip level
+/// this function return total block include all mip levels
+pub fn getTotalBlock(image_info: ImageInfo) u32 {
+    var current_block = image_info.total_blocks;
+    var current_value = current_block;
+    var i: u32 = 1;
+    while (i < image_info.total_levels) : (i += 1) {
+        current_value = current_value >> 2;
+        current_block += current_value;
+    }
+    return current_block;
+}
+
 const ImageInfo = extern struct {
     image_index: u32,
     total_levels: u32,

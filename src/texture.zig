@@ -248,14 +248,14 @@ pub const Texture = struct {
                 const ii = basisu.imageInfo(data.ptr, data_len, i);
                 std.log.info("{}", .{ii});
 
-                var buffer = try allocator.alloc(u8, basisu.getTotalBlock(ii) * bytes_per_block);
                 const stage_buffer = try Buffer.init(gc, .{
-                    .size = buffer.len,
+                    .size = basisu.getTotalBlock(ii) * bytes_per_block,
                     .buffer_usage = .{ .transfer_src_bit = true },
                     .memory_usage = .cpu_to_gpu,
                     .memory_flags = .{},
                 }, filename);
                 defer stage_buffer.deinit(gc);
+                var gpu_mem = try stage_buffer.mapMemory(gc, u8);
 
                 var j: u32 = 0;
 
@@ -269,7 +269,7 @@ pub const Texture = struct {
                         data.ptr,
                         data_len,
                         &li,
-                        @ptrCast(*anyopaque, buffer[buffer_offset .. buffer_offset + total_bytes].ptr),
+                        @ptrCast(*anyopaque, &gpu_mem[buffer_offset]),
                         .bc7_rgba,
                     ));
                     bics[j] = .{
@@ -295,7 +295,7 @@ pub const Texture = struct {
                     };
                     buffer_offset += total_bytes;
                 }
-                try stage_buffer.upload(u8, gc, buffer);
+                try stage_buffer.flushAllocation(gc);
 
                 texture.image = try Image.init(gc, .{
                     .flags = .{},

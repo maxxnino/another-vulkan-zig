@@ -84,6 +84,26 @@ pub fn upload(self: Buffer, comptime T: type, gc: GraphicsContext, data: []const
     }
 }
 
+/// This function return slice of T, just copy data to that slice,
+/// it's will avaiable on the gpu. Make sure call flushAllocation
+/// to upload it to the gpu and unmap the slice,
+pub fn mapMemory(self: Buffer, gc: GraphicsContext, comptime T: type) ![*]T {
+    // make sure it a stage bufffer
+    std.debug.assert(self.create_info.memory_usage == .cpu_to_gpu);
+    return if (self.info.pMappedData) |mem|
+        @intToPtr([*]T, @ptrToInt(mem))
+    else
+        try gc.allocator.mapMemory(self.allocation, T);
+}
+
+/// This function only mean to be called after mapMemory
+pub fn flushAllocation(self: Buffer, gc: GraphicsContext) !void {
+    try gc.allocator.flushAllocation(self.allocation, 0, self.info.size);
+    if (self.info.pMappedData == null) {
+        gc.allocator.unmapMemory(self.allocation);
+    }
+}
+
 fn copyToBuffer(src: Buffer, dst: Buffer, gc: GraphicsContext) !void {
     // TODO: because smallest buffer size is 256 byte.
     // if data size is < 256, group multiple data to one buffer
