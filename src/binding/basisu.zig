@@ -1,17 +1,4 @@
-/// the total_blocks in ImageInfo only for the first mip level
-/// this function return total block include all mip levels
-pub fn getTotalBlock(image_info: ImageInfo) u32 {
-    var current_block = image_info.total_blocks;
-    var current_value = current_block;
-    var i: u32 = 1;
-    while (i < image_info.total_levels) : (i += 1) {
-        current_value = current_value >> 2;
-        current_block += current_value;
-    }
-    return current_block;
-}
-
-const ImageInfo = extern struct {
+pub const ImageInfo = extern struct {
     image_index: u32,
     total_levels: u32,
 
@@ -33,7 +20,7 @@ const ImageInfo = extern struct {
     is_iframe: bool,
 };
 
-const ImageLevelInfo = extern struct {
+pub const ImageLevelInfo = extern struct {
     image_index: u32,
     level_index: u32,
 
@@ -58,8 +45,12 @@ const ImageLevelInfo = extern struct {
     alpha_flag: bool,
     // true if the image is an I-Frame
     iframe_flag: bool,
+
+    pub inline fn totalBytes(self: ImageLevelInfo, bytes_per_block: u32) u32 {
+        return self.total_blocks * bytes_per_block;
+    }
 };
-pub const CompressedFormat = enum(i32) {
+pub const TextureFormat = enum(i32) {
 
     /// ETC1-2
     /// Opaque only, returns RGB or alpha data if cDecodeFlagsTranscodeAlphaDataToOpaqueFormats flag is specified
@@ -122,16 +113,16 @@ pub const CompressedFormat = enum(i32) {
 
     /// Previously, the caller had some control over which BC7 mode the transcoder output. We've simplified this due to UASTC, which supports numerous modes.
     /// Opaque only, RGB or alpha if cDecodeFlagsTranscodeAlphaDataToOpaqueFormats flag is specified. Highest quality of all the non-ETC1 formats.
-    pub const bc7_m6_rgb = CompressedFormat.bc7_rgba;
+    pub const bc7_m6_rgb = TextureFormat.bc7_rgba;
     /// Opaque+alpha, alpha channel will be opaque for opaque .basis files
-    pub const bc7_m5_rgbA = CompressedFormat.bc7_rgba;
-    pub const bc7_m6_opaque_only = CompressedFormat.bc7_rgba;
-    pub const bc7_m5 = CompressedFormat.bc7_rgba;
+    pub const bc7_m5_rgbA = TextureFormat.bc7_rgba;
+    pub const bc7_m6_opaque_only = TextureFormat.bc7_rgba;
+    pub const bc7_m5 = TextureFormat.bc7_rgba;
     pub const bc7_alT = 7;
 
-    pub const astc_4x4 = CompressedFormat.astc_4x4_RGBA;
+    pub const astc_4x4 = TextureFormat.astc_4x4_RGBA;
 
-    pub const atc_rgba_interpolated_alpha = CompressedFormat.atc_rgba;
+    pub const atc_rgba_interpolated_alpha = TextureFormat.atc_rgba;
 };
 
 /// basisu_transcoder_init() MUST be called before a .basis file can be transcoded.
@@ -147,13 +138,13 @@ pub extern fn start(data: [*]const u8, size: u32) void;
 pub extern fn totalImages(data: [*]const u8, size: u32) u32;
 
 /// Returns information about the specified image.
-pub extern fn imageInfo(data: [*]const u8, size: u32, image_index: u32) ImageInfo;
+pub extern fn imageInfo(data: [*]const u8, size: u32, info: *ImageInfo, image_index: u32) bool;
 
 /// Returns information about the specified image's mipmap level.
-pub extern fn imageLevelInfo(data: [*]const u8, size: u32, image_index: u32, level_index: u32) ImageLevelInfo;
+pub extern fn imageLevelInfo(data: [*]const u8, size: u32, info: *ImageLevelInfo, image_index: u32, level_index: u32) bool;
 
 /// get bytes per blocks base on texture format
-pub extern fn bytesPerBlock(fmt: CompressedFormat) u32;
+pub extern fn bytesPerBlock(fmt: TextureFormat) u32;
 
 /// transcode_image_level() decodes a single mipmap level from the .basis file 
 /// to any of the supported output texture formats.
@@ -178,5 +169,5 @@ pub extern fn transcodeImageLevel(
     size: u32,
     image_level_info: *const ImageLevelInfo,
     output_blocks: *anyopaque,
-    fmt: CompressedFormat,
+    fmt: TextureFormat,
 ) bool;

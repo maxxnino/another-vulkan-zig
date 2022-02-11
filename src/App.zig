@@ -254,21 +254,18 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             self.gc,
             .unorm,
             "assets/SciFiHelmet/SciFiHelmet_Normal.basis",
-            // .{ .anisotropy = true, .mip_map = true },
         ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
             .unorm,
             "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.basis",
-            // .{ .anisotropy = true, .mip_map = true },
         ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
             .unorm,
             "assets/SciFiHelmet/SciFiHelmet_AmbientOcclusion.basis",
-            // .{ .anisotropy = true, .mip_map = true },
         ),
     };
 
@@ -282,17 +279,17 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             50, 50, 50, 255,
             50, 50, 50, 255,
         }, 6, 1, 4, .{}, "default skybox"),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
             .cube_map,
-            "assets/cube_map.png",
-            .{ .anisotropy = true, .mip_map = true },
+            "assets/cube_map.basis",
         ),
-        try Texture.loadFromFile(
+        try Texture.loadCompressFromFile(
+            allocator,
             self.gc,
             .cube_map,
-            "assets/cube_map_2.png",
-            .{ .anisotropy = true, .mip_map = true },
+            "assets/cube_map_2.basis",
         ),
     };
     const skybox_vert = try Shader.createFromFile(
