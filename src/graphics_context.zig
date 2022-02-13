@@ -29,8 +29,8 @@ const required_device_feature = vk.PhysicalDeviceFeatures{
 };
 
 const required_instance_layers = [_][*:0]const u8{
-    "VK_LAYER_KHRONOS_validation",
-} ++ if (enable_safety) [_][*:0]const u8{"VK_LAYER_KHRONOS_synchronization2"} else .{};
+    "VK_LAYER_KHRONOS_synchronization2",
+} ++ if (enable_safety) [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"} else [_][*:0]const u8{};
 
 const required_validation_features = [_]vk.ValidationFeatureEnableEXT{
     .gpu_assisted_ext,
@@ -118,8 +118,8 @@ pub const GraphicsContext = struct {
             .flags = .{},
             .p_next = validation_features,
             .p_application_info = &app_info,
-            .enabled_layer_count = if (enable_safety) 2 else 0,
-            .pp_enabled_layer_names = if (enable_safety) @ptrCast([*]const [*:0]const u8, &required_instance_layers) else undefined,
+            .enabled_layer_count = if (enable_safety) 2 else 1,
+            .pp_enabled_layer_names = &required_instance_layers,
             .enabled_extension_count = @intCast(u32, instance_exts.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &instance_exts[0]),
         }, null);
