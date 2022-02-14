@@ -68,7 +68,7 @@ pub fn addShader(self: *Self, shader: Shader) !void {
 pub fn createDescriptorSetLayout(self: Self, gc: GraphicsContext, label: ?[*:0]const u8) !vk.DescriptorSetLayout {
     const dslb = self.layout.values();
     return gc.create(vk.DescriptorSetLayoutCreateInfo{
-        .flags = .{},
+        .flags = .{ .push_descriptor_bit_khr = true },
         .binding_count = @truncate(u32, dslb.len),
         .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, dslb.ptr),
     }, label);

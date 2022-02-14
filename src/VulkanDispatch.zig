@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vma = @import("binding/vma.zig");
 const MyBuffer = @import("Buffer.zig");
-pub const enable_safety = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+pub const enable_safety = std.debug.runtime_safety;
+// pub const enable_safety = true;
 
 pub const BaseDispatch = vk.BaseWrapper(&.{
     .createInstance,
@@ -114,6 +115,7 @@ const device_command = [_]vk.DeviceCommand{
     .cmdBindVertexBuffers,
     .cmdBindDescriptorSets,
     .cmdPipelineBarrier2KHR,
+    .cmdPushDescriptorSetKHR,
 } ++ device_vma ++ if (enable_safety) device_debug else [_]vk.DeviceCommand{};
 pub const DeviceDispatch = vk.DeviceWrapper(&device_command);
 
@@ -148,7 +150,6 @@ pub fn destroy(vkd: DeviceDispatch, dev: vk.Device, resource: anytype) void {
 }
 
 pub fn create(vkd: DeviceDispatch, dev: vk.Device, create_info: anytype, object_name: ?[*:0]const u8) !CreateInfoToType(@TypeOf(create_info)) {
-    _ = object_name;
     const CreateInfo = @TypeOf(create_info);
     const name = @typeName(CreateInfo);
     if (CreateInfo == vk.ImageCreateInfo or CreateInfo == vk.BufferCreateInfo or CreateInfo == MyBuffer.CreateInfo) {

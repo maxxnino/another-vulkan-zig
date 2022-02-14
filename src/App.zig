@@ -32,7 +32,7 @@ const Vec4 = z.Vec4;
 
 const Vertex = VertexGen(struct {
     // TODO: add support for quantination mesh
-    // position: z.Vector3(u16),
+    // position: z.Vector3(f16),
     // texcoord: z.Vector2(u16),
     // normal: z.Vector3(i8),
     // tangent: z.Vector4(i8),
@@ -43,8 +43,8 @@ const Vertex = VertexGen(struct {
     tangent: z.Vector4(f32),
     pub fn format(component: anytype) vk.Format {
         return switch (component) {
-            // .position => .r16g16b16_unorm,
-            // .texcoord => .r16g16_unorm,
+            // .position => .r16g16b16_sfloat,
+            // .texcoord => .r16g16_snorm,
             // .normal => .r8g8b8_snorm,
             // .tangent => .r8g8b8a8_snorm,
 
@@ -52,16 +52,6 @@ const Vertex = VertexGen(struct {
             .texcoord => .r32g32_sfloat,
             .normal => .r32g32b32_sfloat,
             .tangent => .r32g32b32a32_sfloat,
-        };
-    }
-
-    pub fn accessorType(comptime at: cgltf.AttributeType) cgltf.Type {
-        return switch (at) {
-            .position => .vec3,
-            .texcoord => .vec2,
-            .normal => .vec3,
-            .tangent => .vec4,
-            else => unreachable,
         };
     }
 
@@ -76,6 +66,15 @@ const Vertex = VertexGen(struct {
             // .texcoord => .r_16u,
             // .normal => .r_8,
             // .tangent => .r_8,
+            else => unreachable,
+        };
+    }
+    pub fn accessorType(comptime at: cgltf.AttributeType) cgltf.Type {
+        return switch (at) {
+            .position => .vec3,
+            .texcoord => .vec2,
+            .normal => .vec3,
+            .tangent => .vec4,
             else => unreachable,
         };
     }
@@ -150,7 +149,6 @@ camera: Camera,
 ubo_buffers: []Buffer,
 index_buffer: Buffer,
 descriptor_pool: vk.DescriptorPool,
-des_sets: []vk.DescriptorSet,
 bindless_sets: vk.DescriptorSet,
 immutable_sampler_set: vk.DescriptorSet,
 draw_pool: DrawPool,
@@ -184,6 +182,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     std.debug.print("Using device: {s}\n", .{self.gc.deviceName()});
 
+    std.log.err("0", .{});
     self.swapchain = try Swapchain.init(self.gc, allocator, .{ .width = self.window.width, .height = self.window.height });
 
     // ********** BasicRenderer **********
@@ -240,7 +239,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     self.framebuffers = try createFramebuffers(self.gc, allocator, self.swapchain, &self.renderer, srcToString(@src()));
     //*********************************
 
-    const frame_size = @truncate(u32, self.framebuffers.len);
     self.textures = [_]Texture{
         try Texture.loadFromMemory(self.gc, .srgb, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadCompressFromFile(
@@ -285,12 +283,24 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .cube_map,
             "assets/cube_map.basis",
         ),
+        // try Texture.loadFromFile(
+        //     self.gc,
+        //     .cube_map,
+        //     "assets/cube_map.png",
+        //     .{},
+        // ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
             .cube_map,
             "assets/cube_map_2.basis",
         ),
+        // try Texture.loadFromFile(
+        //     self.gc,
+        //     .cube_map,
+        //     "assets/cube_map_2.png",
+        //     .{},
+        // ),
     };
     const skybox_vert = try Shader.createFromFile(
         self.gc,
@@ -369,7 +379,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     try self.index_buffer.upload(u32, self.gc, self.indices.items);
 
     // Desciptor Set
-    // const pool_size = frame_size;
     const pool_sizes = [_]vk.DescriptorPoolSize{
         .{
             .@"type" = .sampled_image,
@@ -379,39 +388,34 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .@"type" = .sampler,
             .descriptor_count = 1,
         },
-        .{
-            .@"type" = .uniform_buffer,
-            .descriptor_count = frame_size,
-        },
+        // .{
+        //     .@"type" = .uniform_buffer,
+        //     .descriptor_count = frame_size,
+        // },
     };
     self.descriptor_pool = try self.gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
-        .max_sets = frame_size + 2,
+        .max_sets = 2,
         .pool_size_count = @truncate(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
     }, srcToString(@src()));
 
-    var des_layouts = try allocator.alloc(vk.DescriptorSetLayout, frame_size);
-    defer allocator.free(des_layouts);
-    for (des_layouts) |*l| {
-        l.* = self.renderer.pipeline.descriptor_set_layout;
-    }
-    var dsai = vk.DescriptorSetAllocateInfo{
-        .descriptor_pool = self.descriptor_pool,
-        .descriptor_set_count = frame_size,
-        .p_set_layouts = des_layouts.ptr,
-    };
-
     //ubo sets
-    self.des_sets = try allocator.alloc(vk.DescriptorSet, frame_size);
-    try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, self.des_sets.ptr);
-    for (self.des_sets) |ds, i| {
-        updateDescriptorSet(self.gc, ds, self.ubo_buffers[i]);
-    }
+    // self.des_sets = try allocator.alloc(vk.DescriptorSet, frame_size);
+    // try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, self.des_sets.ptr);
+    // for (self.des_sets) |ds, i| {
+    //     updateDescriptorSet(self.gc, ds, self.ubo_buffers[i]);
+    // }
 
     // immutable_sampler_set
-    dsai.descriptor_set_count = 1;
-    des_layouts[0] = self.renderer.pipeline.immutable_sampler_set_layout;
+    var des_layouts = [_]vk.DescriptorSetLayout{
+        self.renderer.pipeline.immutable_sampler_set_layout,
+    };
+    var dsai = vk.DescriptorSetAllocateInfo{
+        .descriptor_pool = self.descriptor_pool,
+        .descriptor_set_count = 1,
+        .p_set_layouts = &des_layouts,
+    };
     try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.immutable_sampler_set));
     try self.gc.markHandle(self.immutable_sampler_set, .descriptor_set, "immutable_sampler_set " ++ srcToString(@src()));
 
@@ -488,7 +492,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 pub fn deinit(self: *Self) void {
     self.draw_pool.deinit(self.gc);
     self.gc.destroy(self.descriptor_pool);
-    self.allocator.free(self.des_sets);
     for (self.ubo_buffers) |ubo| {
         ubo.deinit(self.gc);
     }
@@ -531,6 +534,13 @@ pub fn run(self: *Self) !void {
             const current = self.skybox_push_constant.base_color_id - texture_len;
             self.skybox_push_constant.base_color_id = ((current + 1) % sky_len) + texture_len;
         }
+        if (self.window.isKey(.f, .just_press)) {
+            const texture_len = @truncate(u32, self.textures.len);
+            const sky_len = @truncate(u32, self.skybox_textures.len);
+            var current = self.skybox_push_constant.base_color_id - texture_len;
+            if (current > 0) current -= 1;
+            self.skybox_push_constant.base_color_id = ((current) % sky_len) + texture_len;
+        }
 
         self.light.update(self.window, dt);
         self.object_push_constant.light = self.light.getPos();
@@ -549,12 +559,31 @@ pub fn run(self: *Self) !void {
                 .graphics,
                 self.renderer.pipeline.pipeline_layout,
                 0,
-                3,
-                &[_]vk.DescriptorSet{ self.bindless_sets, self.immutable_sampler_set, self.des_sets[i] },
+                2,
+                &[_]vk.DescriptorSet{ self.bindless_sets, self.immutable_sampler_set },
                 0,
                 undefined,
             );
+
+            const wds = [_]vk.WriteDescriptorSet{
+                .{
+                    .dst_set = .null_handle,
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .uniform_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = &[_]vk.DescriptorBufferInfo{.{
+                        .buffer = self.ubo_buffers[i].buffer,
+                        .offset = 0,
+                        .range = self.ubo_buffers[i].create_info.size,
+                    }},
+                    .p_texel_buffer_view = undefined,
+                },
+            };
             self.renderer.pipeline.pushConstant(self.gc, cmdbuf, .{ .fragment_bit = true }, self.object_push_constant);
+            self.gc.vkd.cmdPushDescriptorSetKHR(cmdbuf, .graphics, self.renderer.pipeline.pipeline_layout, 2, 1, &wds);
+
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 
             //draw skybox
@@ -675,6 +704,12 @@ pub fn appendGltfModel(
             current_indices_index += mesh.num_indices;
         }
     }
+    // for (slice.items(.position)) |t| {
+    //     std.log.info("{}", .{t});
+    // }
+    // for (all_indices.items) |i| {
+    //     std.log.info("{}", .{i});
+    // }
 }
 
 fn parseAndLoadGltfFile(gltf_path: [:0]const u8) *cgltf.Data {
@@ -765,7 +800,6 @@ fn appendMeshPrimitive(
 
         const data_addr = @ptrCast([*]const u8, buffer_view.buffer.data.?) +
             accessor.offset + buffer_view.offset;
-
         switch (attrib.type) {
             .position => if (Vertex.hasComponent(.position)) {
                 assert(accessor.type == Vertex.accessorType(.position));

@@ -16,6 +16,7 @@ const required_device_extensions = [_][*:0]const u8{
     vk.extension_info.khr_swapchain.name,
     vk.extension_info.ext_descriptor_indexing.name,
     vk.extension_info.khr_synchronization_2.name,
+    vk.extension_info.khr_push_descriptor.name,
 };
 
 const required_instance_extensions = [_][*:0]const u8{
