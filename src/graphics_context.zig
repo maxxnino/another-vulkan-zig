@@ -27,6 +27,7 @@ const required_device_feature = vk.PhysicalDeviceFeatures{
     .sampler_anisotropy = vk.TRUE,
     .sample_rate_shading = vk.TRUE,
     .texture_compression_bc = vk.TRUE,
+    .shader_int_16 = vk.TRUE,
 };
 
 const required_instance_layers = [_][*:0]const u8{
@@ -256,12 +257,12 @@ pub const GraphicsContext = struct {
         errdefer self.destroy(fence);
 
         // Submit to the queue
-        try self.vkd.queueSubmit2KHR(self.graphics_queue.handle, 1, &[_]vk.SubmitInfo2KHR{.{
+        try self.vkd.queueSubmit2(self.graphics_queue.handle, 1, &[_]vk.SubmitInfo2{.{
             .flags = .{},
             .wait_semaphore_info_count = 0,
             .p_wait_semaphore_infos = undefined,
             .command_buffer_info_count = 1,
-            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfoKHR{.{
+            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfo{.{
                 .command_buffer = cmdbuf,
                 .device_mask = 0,
             }},
@@ -370,13 +371,18 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
     else
         2;
 
-    // enable khr_synchronization_2 feature
-    const khr_synchronization_2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
-        .synchronization_2 = vk.TRUE,
+    var storage_16 = vk.PhysicalDevice16BitStorageFeatures{
         // .p_next = null,
+        .storage_buffer_16_bit_access = vk.TRUE,
+        .uniform_and_storage_buffer_16_bit_access = vk.TRUE,
+    };
+    // enable khr_synchronization_2 feature
+    var khr_synchronization_2 = vk.PhysicalDeviceSynchronization2Features{
+        .synchronization_2 = vk.TRUE,
+        .p_next = @ptrCast(*anyopaque, &storage_16),
     };
     const descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures{
-        .p_next = @ptrCast(*const anyopaque, &khr_synchronization_2),
+        .p_next = @ptrCast(*anyopaque, &khr_synchronization_2),
         // .shader_input_attachment_array_dynamic_indexing= Bool32 = FALSE,
         // .shader_uniform_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,
         // .shader_storage_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,

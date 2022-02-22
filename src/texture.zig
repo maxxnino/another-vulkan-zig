@@ -20,10 +20,10 @@ pub const TextureType = enum {
 pub const Texture = struct {
     pub const Config = struct {
         /// true mean enable anisotropy
-        anisotropy: bool = false,
+        anisotropy: bool = true,
 
         /// true mean enable mip map
-        mip_map: bool = false,
+        mip_map: bool = true,
     };
     image: Image,
     view: vk.ImageView,
@@ -96,8 +96,8 @@ pub const Texture = struct {
             .@"undefined",
             .transfer_dst_optimal,
             comptime Image.accessMaskFrom(.@"undefined", .transfer_dst_optimal),
-            if (config.mip_map) .{ .all_transfer_bit_khr = true } else .{},
-            .{ .all_transfer_bit_khr = true },
+            if (config.mip_map) .{ .all_transfer_bit = true } else .{},
+            .{ .all_transfer_bit = true },
             subresource_range,
         );
         // Copy the first mip of the chain, remaining mips will be generated if needed
@@ -182,8 +182,8 @@ pub const Texture = struct {
                 .transfer_dst_optimal,
                 .shader_read_only_optimal,
                 comptime Image.accessMaskFrom(.transfer_dst_optimal, .shader_read_only_optimal),
-                .{ .all_transfer_bit_khr = true },
-                .{ .fragment_shader_bit_khr = true },
+                .{ .all_transfer_bit = true },
+                .{ .fragment_shader_bit = true },
                 subresource_range,
             );
         }
@@ -240,7 +240,7 @@ pub const Texture = struct {
         const bytes_per_block = basisu.bytesPerBlock(.bc7_rgba);
 
         const image_data = try calculateImageData(allocator, data.ptr, data_len, bytes_per_block);
-        std.log.info("{s} is {}kb", .{filename, image_data.total_bytes / 1024});
+        std.log.info("{s} is {}kb", .{ filename, image_data.total_bytes / 1024 });
 
         const image_info: struct {
             width: u32,
@@ -324,7 +324,7 @@ pub const Texture = struct {
             .transfer_dst_optimal,
             comptime Image.accessMaskFrom(.@"undefined", .transfer_dst_optimal),
             .{},
-            .{ .all_transfer_bit_khr = true },
+            .{ .all_transfer_bit = true },
             subresource_range,
         );
 
@@ -342,8 +342,8 @@ pub const Texture = struct {
             .transfer_dst_optimal,
             .shader_read_only_optimal,
             comptime Image.accessMaskFrom(.transfer_dst_optimal, .shader_read_only_optimal),
-            .{ .all_transfer_bit_khr = true },
-            .{ .fragment_shader_bit_khr = true },
+            .{ .all_transfer_bit = true },
+            .{ .fragment_shader_bit = true },
             subresource_range,
         );
 
@@ -403,7 +403,7 @@ pub const Texture = struct {
             .depth_attachment_optimal,
             comptime Image.accessMaskFrom(.@"undefined", .depth_attachment_optimal),
             .{},
-            .{ .early_fragment_tests_bit_khr = true },
+            .{ .early_fragment_tests_bit = true },
             subresource_range,
         );
         try gc.endOneTimeCommandBuffer(cmdbuf);

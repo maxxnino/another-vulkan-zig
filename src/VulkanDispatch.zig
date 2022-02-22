@@ -6,136 +6,153 @@ const MyBuffer = @import("Buffer.zig");
 pub const enable_safety = std.debug.runtime_safety;
 // pub const enable_safety = true;
 
-pub const BaseDispatch = vk.BaseWrapper(&.{
-    .createInstance,
-    .enumerateInstanceExtensionProperties,
-    .enumerateInstanceLayerProperties,
+pub const BaseDispatch = vk.BaseWrapper(.{
+    .createInstance = true,
+    .enumerateInstanceExtensionProperties = true,
+    .enumerateInstanceLayerProperties = true,
 });
 
-const instance_vma = [_]vk.InstanceCommand{
-    .getPhysicalDeviceProperties,
-    .getPhysicalDeviceMemoryProperties,
-};
-const instance_debug = [_]vk.InstanceCommand{
-    .createDebugUtilsMessengerEXT,
-    .destroyDebugUtilsMessengerEXT,
-};
-const instance_command = [_]vk.InstanceCommand{
-    .destroyInstance,                         .createDevice,
-    .destroySurfaceKHR,                       .enumeratePhysicalDevices,
-    .enumerateDeviceExtensionProperties,      .getPhysicalDeviceSurfaceFormatsKHR,
-    .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceCapabilitiesKHR,
-    .getPhysicalDeviceQueueFamilyProperties,  .getPhysicalDeviceSurfaceSupportKHR,
-    .getDeviceProcAddr,                       .getPhysicalDeviceFeatures,
-    .getPhysicalDeviceFeatures2,              .getPhysicalDeviceFormatProperties,
-} ++ instance_vma ++ if (enable_safety) instance_debug else [_]vk.InstanceCommand{};
-pub const InstanceDispatch = vk.InstanceWrapper(&instance_command);
+pub const InstanceDispatch = vk.InstanceWrapper(.{
+    //vma
+    .getPhysicalDeviceProperties = true,
+    .getPhysicalDeviceMemoryProperties = true,
 
-const device_debug = [_]vk.DeviceCommand{
-    .cmdBeginDebugUtilsLabelEXT,
-    .cmdEndDebugUtilsLabelEXT,
-    .cmdInsertDebugUtilsLabelEXT,
-    .setDebugUtilsObjectNameEXT,
-};
-const device_vma = [_]vk.DeviceCommand{
-    .createImage,
-    .createBuffer,
-    .destroyImage,
-    .destroyBuffer,
-    .cmdCopyBuffer,
-    .bindImageMemory,
-    .bindBufferMemory,
-    .getImageMemoryRequirements2,
-    .getBufferMemoryRequirements2,
-    .mapMemory,
-    .freeMemory,
-    .unmapMemory,
-    .allocateMemory,
-    .flushMappedMemoryRanges,
-};
-const device_command = [_]vk.DeviceCommand{
-    .destroyDevice,
-    .getDeviceQueue,
-    .createSemaphore,
-    .createFence,
-    .createImageView,
-    .destroyImageView,
-    .destroySemaphore,
-    .destroyFence,
-    .getSwapchainImagesKHR,
-    .createSwapchainKHR,
-    .destroySwapchainKHR,
-    .acquireNextImageKHR,
-    .deviceWaitIdle,
-    .waitForFences,
-    .resetFences,
-    .queuePresentKHR,
-    .createCommandPool,
-    .destroyCommandPool,
-    .allocateCommandBuffers,
-    .freeCommandBuffers,
-    .queueWaitIdle,
-    .createShaderModule,
-    .destroyShaderModule,
-    .createPipelineLayout,
-    .destroyPipelineLayout,
-    .createRenderPass,
-    .destroyRenderPass,
-    .createGraphicsPipelines,
-    .destroyPipeline,
-    .createFramebuffer,
-    .destroyFramebuffer,
-    .createDescriptorSetLayout,
-    .destroyDescriptorSetLayout,
-    .createSampler,
-    .destroySampler,
-    .createDescriptorPool,
-    .destroyDescriptorPool,
-    .allocateDescriptorSets,
-    .updateDescriptorSets,
-    .beginCommandBuffer,
-    .resetCommandPool,
-    .endCommandBuffer,
-    .cmdDraw,
-    .cmdBlitImage,
-    .cmdSetScissor,
-    .cmdSetViewport,
-    .cmdDrawIndexed,
-    .cmdBindPipeline,
-    .cmdPushConstants,
-    .cmdEndRenderPass,
-    .cmdBeginRenderPass,
-    .queueSubmit2KHR,
-    .queueSubmit,
-    .cmdSetEvent2KHR,
-    .cmdResetEvent2KHR,
-    .cmdWaitEvents2KHR,
-    .cmdBindIndexBuffer,
-    .cmdCopyBufferToImage,
-    .cmdBindVertexBuffers,
-    .cmdBindDescriptorSets,
-    .cmdPipelineBarrier2KHR,
-    .cmdPushDescriptorSetKHR,
-} ++ device_vma ++ if (enable_safety) device_debug else [_]vk.DeviceCommand{};
-pub const DeviceDispatch = vk.DeviceWrapper(&device_command);
+    //debug
+    .createDebugUtilsMessengerEXT = enable_safety,
+    .destroyDebugUtilsMessengerEXT = enable_safety,
+
+    //normal
+    .destroyInstance = true,
+    .createDevice = true,
+    .destroySurfaceKHR = true,
+    .enumeratePhysicalDevices = true,
+    .enumerateDeviceExtensionProperties = true,
+    .getPhysicalDeviceSurfaceFormatsKHR = true,
+    .getPhysicalDeviceSurfacePresentModesKHR = true,
+    .getPhysicalDeviceSurfaceCapabilitiesKHR = true,
+    .getPhysicalDeviceQueueFamilyProperties = true,
+    .getPhysicalDeviceSurfaceSupportKHR = true,
+    .getDeviceProcAddr = true,
+    .getPhysicalDeviceFeatures = true,
+    .getPhysicalDeviceFeatures2 = true,
+    .getPhysicalDeviceFormatProperties = true,
+});
+
+pub const DeviceDispatch = vk.DeviceWrapper(.{
+    //vma
+    .createImage = true,
+    .createBuffer = true,
+    .destroyImage = true,
+    .destroyBuffer = true,
+    .cmdCopyBuffer = true,
+    .bindImageMemory = true,
+    .bindBufferMemory = true,
+    .getImageMemoryRequirements2 = true,
+    .getBufferMemoryRequirements2 = true,
+    .mapMemory = true,
+    .freeMemory = true,
+    .unmapMemory = true,
+    .allocateMemory = true,
+    .flushMappedMemoryRanges = true,
+
+    //debug
+    .cmdBeginDebugUtilsLabelEXT = enable_safety,
+    .cmdEndDebugUtilsLabelEXT = enable_safety,
+    .cmdInsertDebugUtilsLabelEXT = enable_safety,
+    .setDebugUtilsObjectNameEXT = enable_safety,
+
+    //normal
+    .destroyDevice = true,
+    .getDeviceQueue = true,
+    .createSemaphore = true,
+    .createFence = true,
+    .createImageView = true,
+    .destroyImageView = true,
+    .destroySemaphore = true,
+    .destroyFence = true,
+    .getSwapchainImagesKHR = true,
+    .createSwapchainKHR = true,
+    .destroySwapchainKHR = true,
+    .acquireNextImageKHR = true,
+    .deviceWaitIdle = true,
+    .waitForFences = true,
+    .resetFences = true,
+    .queuePresentKHR = true,
+    .createCommandPool = true,
+    .destroyCommandPool = true,
+    .allocateCommandBuffers = true,
+    .freeCommandBuffers = true,
+    .queueWaitIdle = true,
+    .createShaderModule = true,
+    .destroyShaderModule = true,
+    .createPipelineLayout = true,
+    .destroyPipelineLayout = true,
+    .createRenderPass = true,
+    .destroyRenderPass = true,
+    .createGraphicsPipelines = true,
+    .destroyPipeline = true,
+    .createFramebuffer = true,
+    .destroyFramebuffer = true,
+    .createDescriptorSetLayout = true,
+    .destroyDescriptorSetLayout = true,
+    .createSampler = true,
+    .destroySampler = true,
+    .createDescriptorPool = true,
+    .destroyDescriptorPool = true,
+    .allocateDescriptorSets = true,
+    .updateDescriptorSets = true,
+    .beginCommandBuffer = true,
+    .resetCommandPool = true,
+    .endCommandBuffer = true,
+    .cmdDraw = true,
+    .cmdBlitImage = true,
+    .cmdSetScissor = true,
+    .cmdSetViewport = true,
+    .cmdDrawIndexed = true,
+    .cmdBindPipeline = true,
+    .cmdPushConstants = true,
+    .cmdEndRenderPass = true,
+    .cmdBeginRenderPass = true,
+    .queueSubmit2 = true,
+    // .queueSubmit = true,
+    // .cmdSetEvent2 = true,
+    // .cmdResetEvent2 = true,
+    // .cmdWaitEvents2 = true,
+    .cmdBindIndexBuffer = true,
+    .cmdCopyBufferToImage = true,
+    .cmdBindVertexBuffers = true,
+    .cmdBindDescriptorSets = true,
+    .cmdPipelineBarrier2 = true,
+    .cmdPushDescriptorSetKHR = true,
+});
 
 pub fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VulkanFunctions {
-    var vma_vulkan_func: vma.VulkanFunctions = undefined;
-
-    // Instance Vma
-    inline for (instance_vma) |cmd| {
-        const name = comptime vk.InstanceCommand.symbol(cmd);
-        if (!@hasField(vma.VulkanFunctions, name)) @compileError("No function " ++ name ++ " in Vma VulkanFunctions");
-        @field(vma_vulkan_func, name) = @field(vki.dispatch, name);
-    }
-
-    // Device Vma
-    inline for (device_vma) |cmd| {
-        const name = comptime vk.DeviceCommand.symbol(cmd);
-        if (!@hasField(vma.VulkanFunctions, name)) @compileError("No function " ++ name ++ " in Vma VulkanFunctions");
-        @field(vma_vulkan_func, name) = @field(vkd.dispatch, name);
-    }
-    return vma_vulkan_func;
+    return .{
+        .getInstanceProcAddr = undefined,
+        .getDeviceProcAddr = undefined,
+        .getPhysicalDeviceProperties = vki.dispatch.vkGetPhysicalDeviceProperties,
+        .getPhysicalDeviceMemoryProperties = vki.dispatch.vkGetPhysicalDeviceMemoryProperties,
+        .allocateMemory = vkd.dispatch.vkAllocateMemory,
+        .freeMemory = vkd.dispatch.vkFreeMemory,
+        .mapMemory = vkd.dispatch.vkMapMemory,
+        .unmapMemory = vkd.dispatch.vkUnmapMemory,
+        .flushMappedMemoryRanges = vkd.dispatch.vkFlushMappedMemoryRanges,
+        .invalidateMappedMemoryRanges = undefined, //vkd.dispatch.vkInvalidateMappedMemoryRanges,
+        .bindBufferMemory = vkd.dispatch.vkBindBufferMemory,
+        .bindImageMemory = vkd.dispatch.vkBindImageMemory,
+        .getBufferMemoryRequirements = undefined, //vkd.dispatch.vkGetBufferMemoryRequirements,
+        .getImageMemoryRequirements = undefined, //vkd.dispatch.vkGetImageMemoryRequirements,
+        .createBuffer = vkd.dispatch.vkCreateBuffer,
+        .destroyBuffer = vkd.dispatch.vkDestroyBuffer,
+        .createImage = vkd.dispatch.vkCreateImage,
+        .destroyImage = vkd.dispatch.vkDestroyImage,
+        .cmdCopyBuffer = vkd.dispatch.vkCmdCopyBuffer,
+        .getBufferMemoryRequirements2 = vkd.dispatch.vkGetBufferMemoryRequirements2,
+        .getImageMemoryRequirements2 = vkd.dispatch.vkGetImageMemoryRequirements2,
+        .bindBufferMemory2 = undefined, //vkd.dispatch.vkBindBufferMemory2,
+        .bindImageMemory2 = undefined, //vkd.dispatch.vkBindImageMemory2,
+        .getPhysicalDeviceMemoryProperties2 = undefined, //vkd.dispatch.vkGetPhysicalDeviceMemoryProperties2,
+    };
 }
 
 // Destroy Function

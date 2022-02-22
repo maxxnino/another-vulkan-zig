@@ -73,11 +73,11 @@ pub fn changeLayout(
     old_layout: vk.ImageLayout,
     new_layout: vk.ImageLayout,
     access_mask: AccessMask,
-    src_stage_mask: vk.PipelineStageFlags2KHR,
-    dst_stage_mask: vk.PipelineStageFlags2KHR,
+    src_stage_mask: vk.PipelineStageFlags2,
+    dst_stage_mask: vk.PipelineStageFlags2,
     subresource_range: vk.ImageSubresourceRange,
 ) void {
-    const barrier = vk.ImageMemoryBarrier2KHR{
+    const barrier = vk.ImageMemoryBarrier2{
         .src_stage_mask = src_stage_mask,
         .src_access_mask = access_mask.src,
         .dst_stage_mask = dst_stage_mask,
@@ -89,27 +89,27 @@ pub fn changeLayout(
         .image = self.image,
         .subresource_range = subresource_range,
     };
-    const di = vk.DependencyInfoKHR{
+    const di = vk.DependencyInfo{
         .dependency_flags = .{},
         .memory_barrier_count = 0,
         .p_memory_barriers = undefined,
         .buffer_memory_barrier_count = 0,
         .p_buffer_memory_barriers = undefined,
         .image_memory_barrier_count = 1,
-        .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2KHR, &barrier),
+        .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &barrier),
     };
-    gc.vkd.cmdPipelineBarrier2KHR(cmdbuf, &di);
+    gc.vkd.cmdPipelineBarrier2(cmdbuf, &di);
     self.layout = new_layout;
 }
 pub const AccessMask = struct {
-    src: vk.AccessFlags2KHR,
-    dst: vk.AccessFlags2KHR,
+    src: vk.AccessFlags2,
+    dst: vk.AccessFlags2,
 };
 /// Source layouts (old)
 /// Source access mask controls actions that have to be finished on the old layout
 /// before it will be transitioned to the new layout
 pub fn accessMaskFrom(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) AccessMask {
-    var src: vk.AccessFlags2KHR = switch (old_layout) {
+    var src: vk.AccessFlags2 = switch (old_layout) {
         // Image layout is undefined (or does not matter)
         // Only valid as initial layout
         // No flags required, listed only for completeness
@@ -118,27 +118,27 @@ pub fn accessMaskFrom(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) Ac
         // Image is preinitialized
         // Only valid as initial layout for linear images, preserves memory contents
         // Make sure host writes have been finished
-        .preinitialized => .{ .host_write_bit_khr = true },
+        .preinitialized => .{ .host_write_bit = true },
 
         // Image is a color attachment
         // Make sure any writes to the color buffer have been finished
-        .color_attachment_optimal => .{ .color_attachment_write_bit_khr = true },
+        .color_attachment_optimal => .{ .color_attachment_write_bit = true },
 
         // Image is a depth/stencil attachment
         // Make sure any writes to the depth/stencil buffer have been finished
-        .depth_attachment_optimal => .{ .depth_stencil_attachment_write_bit_khr = true },
+        .depth_attachment_optimal => .{ .depth_stencil_attachment_write_bit = true },
 
         // Image is a transfer source
         // Make sure any reads from the image have been finished
-        .transfer_src_optimal => .{ .transfer_read_bit_khr = true },
+        .transfer_src_optimal => .{ .transfer_read_bit = true },
 
         // Image is a transfer destination
         // Make sure any writes to the image have been finished
-        .transfer_dst_optimal => .{ .transfer_write_bit_khr = true },
+        .transfer_dst_optimal => .{ .transfer_write_bit = true },
 
         // Image is read by a shader
         // Make sure any shader reads from the image have been finished
-        .shader_read_only_optimal => .{ .shader_read_bit_khr = true },
+        .shader_read_only_optimal => .{ .shader_read_bit = true },
 
         // Other source layouts aren't handled (yet)
         else => unreachable,
@@ -146,32 +146,32 @@ pub fn accessMaskFrom(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) Ac
 
     // Target layouts (new)
     // Destination access mask controls the dependency for the new image layout
-    const dst: vk.AccessFlags2KHR = switch (new_layout) {
+    const dst: vk.AccessFlags2 = switch (new_layout) {
         // case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
         // Image will be used as a transfer destination
         // Make sure any writes to the image have been finished
-        vk.ImageLayout.transfer_dst_optimal => .{ .transfer_write_bit_khr = true },
+        vk.ImageLayout.transfer_dst_optimal => .{ .transfer_write_bit = true },
 
         // Image will be used as a transfer source
         // Make sure any reads from the image have been finished
-        vk.ImageLayout.transfer_src_optimal => .{ .transfer_read_bit_khr = true },
+        vk.ImageLayout.transfer_src_optimal => .{ .transfer_read_bit = true },
 
         // Image will be used as a color attachment
         // Make sure any writes to the color buffer have been finished
-        vk.ImageLayout.color_attachment_optimal => .{ .color_attachment_write_bit_khr = true },
+        vk.ImageLayout.color_attachment_optimal => .{ .color_attachment_write_bit = true },
 
         // Image layout will be used as a depth/stencil attachment
         // Make sure any writes to depth/stencil buffer have been finished
         // imageMemoryBarrier.dstAccessMask | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        vk.ImageLayout.depth_attachment_optimal => .{ .depth_stencil_attachment_write_bit_khr = true },
+        vk.ImageLayout.depth_attachment_optimal => .{ .depth_stencil_attachment_write_bit = true },
 
         // Image will be read in a shader (sampler, input attachment)
         // Make sure any writes to the image have been finished
         vk.ImageLayout.shader_read_only_optimal => blk: {
             if (src.toInt() == 0) {
-                src = src.merge(.{ .host_write_bit_khr = true, .transfer_write_bit_khr = true });
+                src = src.merge(.{ .host_write_bit = true, .transfer_write_bit = true });
             }
-            break :blk .{ .shader_read_bit_khr = true };
+            break :blk .{ .shader_read_bit = true };
         },
 
         // Other source layouts aren't handled (yet)
@@ -233,8 +233,8 @@ pub fn generateMipMap(
         .transfer_dst_optimal,
         .transfer_src_optimal,
         comptime accessMaskFrom(.transfer_dst_optimal, .transfer_src_optimal),
-        .{ .all_transfer_bit_khr = true },
-        .{ .all_transfer_bit_khr = true },
+        .{ .all_transfer_bit= true },
+        .{ .all_transfer_bit= true },
         sr,
     );
 
@@ -279,8 +279,8 @@ pub fn generateMipMap(
             .@"undefined",
             .transfer_dst_optimal,
             comptime accessMaskFrom(.@"undefined", .transfer_dst_optimal),
-            .{ .all_transfer_bit_khr = true },
-            .{ .all_transfer_bit_khr = true },
+            .{ .all_transfer_bit= true },
+            .{ .all_transfer_bit= true },
             sr,
         );
         // Blit from previous level
@@ -301,8 +301,8 @@ pub fn generateMipMap(
             .transfer_dst_optimal,
             .transfer_src_optimal,
             comptime accessMaskFrom(.transfer_dst_optimal, .transfer_src_optimal),
-            .{ .all_transfer_bit_khr = true },
-            .{ .all_transfer_bit_khr = true },
+            .{ .all_transfer_bit= true },
+            .{ .all_transfer_bit= true },
             sr,
         );
     }
@@ -313,8 +313,8 @@ pub fn generateMipMap(
         .transfer_src_optimal,
         .shader_read_only_optimal,
         comptime accessMaskFrom(.transfer_src_optimal, .shader_read_only_optimal),
-        .{ .all_transfer_bit_khr = true },
-        .{ .fragment_shader_bit_khr = true },
+        .{ .all_transfer_bit= true },
+        .{ .fragment_shader_bit= true },
         subresource_range,
     );
 }

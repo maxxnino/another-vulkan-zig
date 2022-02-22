@@ -165,22 +165,22 @@ pub const Swapchain = struct {
         // Step 2: Submit the command buffer
         self.swap_images[self.image_index].cmdbuf = cmdbuf;
 
-        try gc.vkd.queueSubmit2KHR(gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo2KHR{.{
+        try gc.vkd.queueSubmit2(gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo2{.{
             .flags = .{},
             .wait_semaphore_info_count = 1,
-            .p_wait_semaphore_infos = &[_]vk.SemaphoreSubmitInfoKHR{.{
+            .p_wait_semaphore_infos = &[_]vk.SemaphoreSubmitInfo{.{
                 .semaphore = current.image_acquired,
                 .value = 1,
                 .stage_mask = .{},
                 .device_index = 0,
             }},
             .command_buffer_info_count = 1,
-            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfoKHR{.{
+            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfo{.{
                 .command_buffer = cmdbuf.cmd,
                 .device_mask = 0,
             }},
             .signal_semaphore_info_count = 1,
-            .p_signal_semaphore_infos = &[_]vk.SemaphoreSubmitInfoKHR{.{
+            .p_signal_semaphore_infos = &[_]vk.SemaphoreSubmitInfo{.{
                 .semaphore = current.render_finished,
                 .value = 1,
                 .stage_mask = .{},
