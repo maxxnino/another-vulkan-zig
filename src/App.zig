@@ -2,7 +2,6 @@ const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const cgltf = @import("binding/cgltf.zig");
-const resources = @import("resources");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Buffer = @import("Buffer.zig");
@@ -11,7 +10,6 @@ const Camera = @import("Camera.zig");
 const tex = @import("texture.zig");
 const Texture = tex.Texture;
 const Shader = @import("Shader.zig");
-const ShaderBinding = @import("ShaderBinding.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
 const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
@@ -31,41 +29,26 @@ const Vec2 = z.Vec2;
 const Vec4 = z.Vec4;
 
 const Vertex = VertexGen(struct {
-    // TODO: add support for quantination mesh
-    // position: z.Vector3(f16),
-    // texcoord: z.Vector2(u16),
-    // normal: z.Vector3(i8),
-    // tangent: z.Vector4(i8),
+    position: z.Vector4(u16),
+    texcoord: z.Vector2(u16),
+    normal: z.Vector4(i8),
+    tangent: z.Vector4(i8),
 
-    position: z.Vector3(f32),
-    texcoord: z.Vector2(f32),
-    normal: z.Vector3(f32),
-    tangent: z.Vector4(f32),
     pub fn format(component: anytype) vk.Format {
         return switch (component) {
-            // .position => .r16g16b16_sfloat,
-            // .texcoord => .r16g16_snorm,
-            // .normal => .r8g8b8_snorm,
-            // .tangent => .r8g8b8a8_snorm,
-
-            .position => .r32g32b32_sfloat,
-            .texcoord => .r32g32_sfloat,
-            .normal => .r32g32b32_sfloat,
-            .tangent => .r32g32b32a32_sfloat,
+            .position => .r16g16b16a16_unorm,
+            .texcoord => .r16g16_unorm,
+            .normal => .r8g8b8a8_snorm,
+            .tangent => .r8g8b8a8_snorm,
         };
     }
 
     pub fn componentType(comptime at: cgltf.AttributeType) cgltf.ComponentType {
         return switch (at) {
-            .position => .r_32f,
-            .texcoord => .r_32f,
-            .normal => .r_32f,
-            .tangent => .r_32f,
-
-            // .position => .r_16u,
-            // .texcoord => .r_16u,
-            // .normal => .r_8,
-            // .tangent => .r_8,
+            .position => .r_16u,
+            .texcoord => .r_16u,
+            .normal => .r_8,
+            .tangent => .r_8,
             else => unreachable,
         };
     }
@@ -140,7 +123,7 @@ renderer: BasicRenderer,
 framebuffers: []vk.Framebuffer,
 vertex_buffer: Vertex.Buffer,
 textures: [5]Texture,
-skybox_textures: [3]Texture,
+skybox_textures: [1]Texture,
 skybox_pipeline: Pipeline,
 skybox_push_constant: PushConstant,
 object_push_constant: PushConstant,
@@ -166,12 +149,13 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     self.indices = std.ArrayList(u32).init(allocator);
     self.vertices = Vertex.MultiArrayList{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
-    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet.gltf");
+    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet_fast.gltf");
+    // appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/cube_fast.gltf");
     self.viking_room = Model{
         .mesh_begin = 0,
         .mesh_end = @truncate(u32, self.meshs.items.len),
     };
-    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/cube.gltf");
+    appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/cube_fast.gltf");
     self.cube = Model{
         .mesh_begin = self.viking_room.mesh_end,
         .mesh_end = @truncate(u32, self.meshs.items.len),
@@ -180,44 +164,37 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     self.gc = try GraphicsContext.init(allocator, app_name, self.window.window);
 
-    std.debug.print("Using device: {s}\n", .{self.gc.deviceName()});
+    std.log.info("Using device: {s}\n", .{self.gc.deviceName()});
 
-    std.log.err("0", .{});
     self.swapchain = try Swapchain.init(self.gc, allocator, .{ .width = self.window.width, .height = self.window.height });
 
     // ********** BasicRenderer **********
 
-    const vert_shader = try Shader.createFromMemory(
+    const vert_shader = try Shader.createFromFile(
         self.gc,
-        resources.triangle_vert,
+        allocator,
+        "zig-cache/shaders/shaders/triangle.vert.spv",
         "main",
         .{ .vertex = Vertex.inputDescription(&.{ .position, .texcoord, .normal, .tangent }) },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
         }},
-
-        srcToString(@src()),
     );
     defer vert_shader.deinit(self.gc);
 
-    const frag_shader = try Shader.createFromMemory(
+    const frag_shader = try Shader.createFromFile(
         self.gc,
-        resources.triangle_frag,
+        allocator,
+        "zig-cache/shaders/shaders/triangle.frag.spv",
         "main",
         .{ .fragment = {} },
         &[_]Shader.DescriptorBindingLayout{.{
             .binding = 0,
             .descriptor_type = .uniform_buffer,
         }},
-        srcToString(@src()),
     );
     defer frag_shader.deinit(self.gc);
-
-    var shader_binding = ShaderBinding.init(allocator);
-    defer shader_binding.deinit();
-    try shader_binding.addShader(vert_shader);
-    try shader_binding.addShader(frag_shader);
 
     // Define the push constant range used by the pipeline layout
     // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
@@ -227,9 +204,10 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .size = @sizeOf(PushConstant),
     }};
     self.renderer = try BasicRenderer.init(
+        allocator,
         self.gc,
         self.swapchain.extent,
-        shader_binding,
+        &.{ vert_shader, frag_shader },
         self.swapchain.surface_format.format,
         &push_constant,
         .{},
@@ -240,7 +218,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     //*********************************
 
     self.textures = [_]Texture{
-        try Texture.loadFromMemory(self.gc, .srgb, &[_]u8{ 125, 125, 125, 255 }, 1, 1, 4, .{}, "default texture"),
+        try Texture.loadFromMemory(self.gc, .srgb, &[_]u8{ 240, 161, 80, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
@@ -269,14 +247,14 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // ================= Skybox ===================
     self.skybox_textures = [_]Texture{
-        try Texture.loadFromMemory(self.gc, .cube_map, &[_]u8{
-            50, 50, 50, 255,
-            50, 50, 50, 255,
-            50, 50, 50, 255,
-            50, 50, 50, 255,
-            50, 50, 50, 255,
-            50, 50, 50, 255,
-        }, 6, 1, 4, .{}, "default skybox"),
+        // try Texture.loadFromMemory(self.gc, .cube_map, &[_]u8{
+        //     50, 50, 50, 255,
+        //     50, 50, 50, 255,
+        //     50, 50, 50, 255,
+        //     50, 50, 50, 255,
+        //     50, 50, 50, 255,
+        //     50, 50, 50, 255,
+        // }, 6, 1, 4, .{}, "default skybox"),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
@@ -289,12 +267,12 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         //     "assets/cube_map.png",
         //     .{},
         // ),
-        try Texture.loadCompressFromFile(
-            allocator,
-            self.gc,
-            .cube_map,
-            "assets/cube_map_2.basis",
-        ),
+        // try Texture.loadCompressFromFile(
+        //     allocator,
+        //     self.gc,
+        //     .cube_map,
+        //     "assets/cube_map_2.basis",
+        // ),
         // try Texture.loadFromFile(
         //     self.gc,
         //     .cube_map,
@@ -328,15 +306,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     );
     defer skybox_frag.deinit(self.gc);
 
-    var skybox_binding = ShaderBinding.init(allocator);
-    defer skybox_binding.deinit();
-    try skybox_binding.addShader(skybox_vert);
-    try skybox_binding.addShader(skybox_frag);
-
     self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
+        allocator,
         self.gc,
         self.renderer.render_pass,
-        skybox_binding,
+        &.{ skybox_vert, skybox_frag },
         &push_constant,
         .{},
         "skybox " ++ srcToString(@src()),
@@ -388,10 +362,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             .@"type" = .sampler,
             .descriptor_count = 1,
         },
-        // .{
-        //     .@"type" = .uniform_buffer,
-        //     .descriptor_count = frame_size,
-        // },
     };
     self.descriptor_pool = try self.gc.create(vk.DescriptorPoolCreateInfo{
         .flags = .{},
@@ -399,13 +369,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .pool_size_count = @truncate(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
     }, srcToString(@src()));
-
-    //ubo sets
-    // self.des_sets = try allocator.alloc(vk.DescriptorSet, frame_size);
-    // try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, self.des_sets.ptr);
-    // for (self.des_sets) |ds, i| {
-    //     updateDescriptorSet(self.gc, ds, self.ubo_buffers[i]);
-    // }
 
     // immutable_sampler_set
     var des_layouts = [_]vk.DescriptorSetLayout{
@@ -522,7 +485,7 @@ pub fn run(self: *Self) !void {
 
         self.camera.moveCamera(self.window, dt);
         try self.ubo_buffers[self.swapchain.image_index].upload(UniformBufferObject, self.gc, &[_]UniformBufferObject{.{
-            .model = Mat4.identity(),
+            .model = Mat4.fromTranslate(Vec3.new(-0.5, -0.5, -0.5)),
             .view = self.camera.getViewMatrix(),
             .proj = self.camera.getProjMatrix(self.swapchain.extent.width, self.swapchain.extent.height),
             .camera_pos = self.camera.pos,
@@ -620,26 +583,6 @@ pub fn run(self: *Self) !void {
     try self.swapchain.waitForAllFences(self.gc);
 }
 
-fn updateDescriptorSet(gc: GraphicsContext, descriptor_set: vk.DescriptorSet, buffer: Buffer) void {
-    const wds = [_]vk.WriteDescriptorSet{
-        .{
-            .dst_set = descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .uniform_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = &[_]vk.DescriptorBufferInfo{.{
-                .buffer = buffer.buffer,
-                .offset = 0,
-                .range = buffer.create_info.size,
-            }},
-            .p_texel_buffer_view = undefined,
-        },
-    };
-    gc.vkd.updateDescriptorSets(gc.dev, @truncate(u32, wds.len), @ptrCast([*]const vk.WriteDescriptorSet, &wds), 0, undefined);
-}
-
 fn createFramebuffers(
     gc: GraphicsContext,
     allocator: Allocator,
@@ -704,12 +647,6 @@ pub fn appendGltfModel(
             current_indices_index += mesh.num_indices;
         }
     }
-    // for (slice.items(.position)) |t| {
-    //     std.log.info("{}", .{t});
-    // }
-    // for (all_indices.items) |i| {
-    //     std.log.info("{}", .{i});
-    // }
 }
 
 fn parseAndLoadGltfFile(gltf_path: [:0]const u8) *cgltf.Data {
@@ -800,6 +737,7 @@ fn appendMeshPrimitive(
 
         const data_addr = @ptrCast([*]const u8, buffer_view.buffer.data.?) +
             accessor.offset + buffer_view.offset;
+
         switch (attrib.type) {
             .position => if (Vertex.hasComponent(.position)) {
                 assert(accessor.type == Vertex.accessorType(.position));

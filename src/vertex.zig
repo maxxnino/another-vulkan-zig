@@ -14,9 +14,7 @@ pub fn VertexGen(comptime Vertex: type) type {
     return struct {
         const Self = @This();
         pub const MultiArrayList = std.MultiArrayList(Vertex);
-        pub const accessorType = Vertex.accessorType;
-        pub const componentType = Vertex.componentType;
-        pub const hasComponent = Vertex.hasComponent;
+        pub usingnamespace Vertex;
 
         const Component = MultiArrayList.Field;
         pub fn inputDescription(comptime components: []const Component) VertexInputDescription {

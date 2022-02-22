@@ -28,22 +28,10 @@ vec3 lightPos() {
 
 layout (location = 0) in vec3 WorldPos;
 layout (location = 1) in vec2 TexCoords;
-layout (location = 2) in vec3 Normal;
-layout (location = 3) in vec4 Tangent;
+layout (location = 2) in mat3 TBN;
 
 layout(location = 0) out vec4 FragColor;
 
-vec3 getNormalFromMap(vec3 normal_color)
-{
-    vec3 tangentNormal = normal_color * 2.0 - 1.0;
-
-    vec3 N   = normalize(Normal);
-    vec3 T  = normalize(Tangent.xyz);
-    vec3 B  = normalize(cross(Normal, T)) * Tangent.w;
-    mat3 TBN = mat3(T, B, N);
-
-    return normalize(TBN * tangentNormal);
-}
 vec3 fresnelSchlick(float cosTheta, vec3 F0)
 {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
@@ -104,7 +92,7 @@ void main() {
     const vec3 mr = sampleId(push.met_rogh_id);
     const vec3 normal_color = sampleId(push.normal_id);
 
-    vec3 N = getNormalFromMap(normal_color);
+    vec3 N = normalize(TBN * (normal_color * 2.0 - 1.0));
     vec3 V = normalize(ubo.camPos - WorldPos);
 
     vec3 Lo = vec3(0.0);
@@ -127,7 +115,6 @@ void main() {
     vec3 kD = vec3(1.0) - kS;
     kD *= 1.0 - mr.r;
 
-  
     float NdotL = max(dot(N, L), 0.0);        
     Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 
