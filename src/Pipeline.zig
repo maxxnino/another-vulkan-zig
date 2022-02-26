@@ -2,7 +2,8 @@ const std = @import("std");
 const vk = @import("vulkan");
 const tex = @import("texture.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
-const ShaderBinding = @import("ShaderBinding.zig");
+const DescriptorLayout = @import("DescriptorLayout.zig");
+const Shader = @import("Shader.zig");
 const Self = @This();
 
 pipeline: vk.Pipeline,
@@ -10,6 +11,7 @@ descriptor_set_layout: vk.DescriptorSetLayout,
 bindless_set_layout: vk.DescriptorSetLayout,
 immutable_sampler_set_layout: vk.DescriptorSetLayout,
 pipeline_layout: vk.PipelineLayout,
+descriptor_template: vk.DescriptorUpdateTemplate,
 
 pub const Options = struct {
     msaa: bool = true,
@@ -18,45 +20,13 @@ pub const Options = struct {
 
 fn createLayout(
     self: *Self,
+    allocator: std.mem.Allocator,
     gc: GraphicsContext,
-    shader_binding: ShaderBinding,
+    shaders: []Shader,
     push_constants: ?[]const vk.PushConstantRange,
     label: ?[*:0]const u8,
 ) !void {
-    self.bindless_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
-        .flags = .{},
-        .binding_count = 1,
-        .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
-            .binding = 0,
-            .descriptor_type = .sampled_image,
-            .descriptor_count = 64,
-            .stage_flags = .{ .fragment_bit = true },
-            .p_immutable_samplers = null,
-        }},
-        .p_next = @ptrCast(*const anyopaque, &vk.DescriptorSetLayoutBindingFlagsCreateInfo{
-            .binding_count = 1,
-            .p_binding_flags = &[_]vk.DescriptorBindingFlags{.{
-                // .update_after_bind_bit = true,
-                .update_unused_while_pending_bit = true,
-                .partially_bound_bit = true,
-                .variable_descriptor_count_bit = true,
-            }},
-        }),
-    }, label);
-
-    self.immutable_sampler_set_layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
-        .flags = .{},
-        .binding_count = 1,
-        .p_bindings = &[_]vk.DescriptorSetLayoutBinding{.{
-            .binding = 0,
-            .descriptor_type = .sampler,
-            .descriptor_count = 1,
-            .stage_flags = .{ .fragment_bit = true },
-            .p_immutable_samplers = &[_]vk.Sampler{gc.immutable_samplers},
-        }},
-    }, label);
-
-    self.descriptor_set_layout = try shader_binding.createDescriptorSetLayout(gc, label);
+    self.descriptor_set_layout = try Shader.createDescriptorSetLayout(allocator, gc, shaders, label);
     self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
         .flags = .{},
         .set_layout_count = 3,
@@ -71,18 +41,22 @@ fn createLayout(
 }
 
 pub fn createSkyboxPipeline(
+    allocator: std.mem.Allocator,
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
-    shader_binding: ShaderBinding,
+    shaders: []Shader,
     push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
+    bindless: DescriptorLayout,
+    immutable_sampler: DescriptorLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var self: Self = undefined;
+    self.immutable_sampler_set_layout = immutable_sampler.layout;
+    self.bindless_set_layout = bindless.layout;
 
-    try self.createLayout(gc, shader_binding, push_constants, label);
+    try self.createLayout(allocator, gc, shaders, push_constants, label);
 
-    const shader_stages = shader_binding.getPipelineShaderStageCreateInfo();
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
         .topology = .triangle_list,
@@ -161,18 +135,27 @@ pub fn createSkyboxPipeline(
         .min_depth_bounds = 0,
         .max_depth_bounds = 1,
     };
+    var shader_stages = std.BoundedArray(vk.PipelineShaderStageCreateInfo, 8){};
+    for (shaders) |shader| {
+        try shader_stages.append(shader.getPipelineShaderStageCreateInfo());
+    }
     const gpci = vk.GraphicsPipelineCreateInfo{
         .flags = .{},
         .stage_count = @truncate(u32, shader_stages.len),
-        .p_stages = shader_stages.ptr,
-        .p_vertex_input_state = if (shader_binding.vertex_stage_info) |vi| &vi else null,
-        .p_input_assembly_state = &piasci, //a
+        .p_stages = shader_stages.slice().ptr,
+        .p_vertex_input_state = blk: {
+            for (shaders) |shader| {
+                if (shader.vertexInputState()) |*value| break :blk value;
+            }
+            break :blk null;
+        },
+        .p_input_assembly_state = &piasci,
         .p_tessellation_state = null,
-        .p_viewport_state = &pvsci, //a
-        .p_rasterization_state = &prsci, // a
-        .p_multisample_state = &pmsci, //a
-        .p_depth_stencil_state = &pdssci, //a
-        .p_color_blend_state = &pcbsci, //
+        .p_viewport_state = &pvsci,
+        .p_rasterization_state = &prsci,
+        .p_multisample_state = &pmsci,
+        .p_depth_stencil_state = &pdssci,
+        .p_color_blend_state = &pcbsci,
         .p_dynamic_state = &pdsci,
         .layout = self.pipeline_layout,
         .render_pass = render_pass,
@@ -186,17 +169,21 @@ pub fn createSkyboxPipeline(
     return self;
 }
 pub fn createBasicPipeline(
+    allocator: std.mem.Allocator,
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
-    shader_binding: ShaderBinding,
+    shaders: []Shader,
     push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
+    bindless: DescriptorLayout,
+    immutable_sampler: DescriptorLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var self: Self = undefined;
+    self.immutable_sampler_set_layout = immutable_sampler.layout;
+    self.bindless_set_layout = bindless.layout;
 
-    try self.createLayout(gc, shader_binding, push_constants, label);
-    const shader_stages = shader_binding.getPipelineShaderStageCreateInfo();
+    try self.createLayout(allocator, gc, shaders, push_constants, label);
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -276,11 +263,21 @@ pub fn createBasicPipeline(
         .min_depth_bounds = 0,
         .max_depth_bounds = 1,
     };
+
+    var shader_stages = std.BoundedArray(vk.PipelineShaderStageCreateInfo, 8){};
+    for (shaders) |shader| {
+        try shader_stages.append(shader.getPipelineShaderStageCreateInfo());
+    }
     const gpci = vk.GraphicsPipelineCreateInfo{
         .flags = .{},
         .stage_count = @truncate(u32, shader_stages.len),
-        .p_stages = shader_stages.ptr,
-        .p_vertex_input_state = if (shader_binding.vertex_stage_info) |vi| &vi else null,
+        .p_stages = shader_stages.slice().ptr,
+        .p_vertex_input_state = blk: {
+            for (shaders) |shader| {
+                if (shader.vertexInputState()) |*value| break :blk value;
+            }
+            break :blk null;
+        },
         .p_input_assembly_state = &piasci,
         .p_tessellation_state = null,
         .p_viewport_state = &pvsci,
@@ -320,8 +317,6 @@ pub fn pushConstant(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, s
 
 pub fn deinit(self: Self, gc: GraphicsContext) void {
     gc.destroy(self.descriptor_set_layout);
-    gc.destroy(self.bindless_set_layout);
-    gc.destroy(self.immutable_sampler_set_layout);
     gc.destroy(self.pipeline_layout);
     gc.destroy(self.pipeline);
 }

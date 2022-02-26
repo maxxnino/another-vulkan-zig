@@ -11,6 +11,7 @@ const tex = @import("texture.zig");
 const Texture = tex.Texture;
 const Shader = @import("Shader.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
+const DescriptorLayout = @import("DescriptorLayout.zig");
 const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
@@ -196,6 +197,25 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     );
     defer frag_shader.deinit(self.gc);
 
+    const bindless = try DescriptorLayout.init(self.gc, .{
+        .bindless = &[_]DescriptorLayout.BindingInfo.BindlessAndNormal{.{
+            .binding = 0,
+            .count = 64,
+            .stage = .{ .fragment_bit = true },
+            .des_type = .sampled_image,
+        }},
+    }, "bindless " ++ srcToString(@src()));
+    defer bindless.deinit(self.gc);
+
+    const immutable = try DescriptorLayout.init(self.gc, .{
+        .immutable_sampler = DescriptorLayout.BindingInfo.ImmutableSampler{
+            .binding = 0,
+            .stage = .{ .fragment_bit = true },
+            .samplers = &.{self.gc.immutable_samplers},
+        },
+    }, "immutable " ++ srcToString(@src()));
+    defer immutable.deinit(self.gc);
+
     // Define the push constant range used by the pipeline layout
     // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
     const push_constant = [_]vk.PushConstantRange{.{
@@ -211,6 +231,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.swapchain.surface_format.format,
         &push_constant,
         .{},
+        bindless,
+        immutable,
         "basic pipeline " ++ srcToString(@src()),
     );
 
@@ -313,6 +335,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         &.{ skybox_vert, skybox_frag },
         &push_constant,
         .{},
+        bindless,
+        immutable,
         "skybox " ++ srcToString(@src()),
     );
     // ============================================
@@ -371,27 +395,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, srcToString(@src()));
 
     // immutable_sampler_set
-    var des_layouts = [_]vk.DescriptorSetLayout{
-        self.renderer.pipeline.immutable_sampler_set_layout,
-    };
-    var dsai = vk.DescriptorSetAllocateInfo{
-        .descriptor_pool = self.descriptor_pool,
-        .descriptor_set_count = 1,
-        .p_set_layouts = &des_layouts,
-    };
-    try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.immutable_sampler_set));
-    try self.gc.markHandle(self.immutable_sampler_set, .descriptor_set, "immutable_sampler_set " ++ srcToString(@src()));
+    self.immutable_sampler_set = try immutable.createDescriptorSet(self.gc, self.descriptor_pool, "immutable_sampler_set");
 
     // bindless_sets
-    const des_variable_sets = vk.DescriptorSetVariableDescriptorCountAllocateInfo{
-        .descriptor_set_count = 1,
-        .p_descriptor_counts = &[_]u32{64},
-    };
-    des_layouts[0] = self.renderer.pipeline.bindless_set_layout;
-    dsai.descriptor_set_count = 1;
-    dsai.p_next = @ptrCast(*const anyopaque, &des_variable_sets);
-    try self.gc.vkd.allocateDescriptorSets(self.gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &self.bindless_sets));
-    try self.gc.markHandle(self.bindless_sets, .descriptor_set, "bindless " ++ srcToString(@src()));
+    self.bindless_sets = try bindless.createDescriptorSet(self.gc, self.descriptor_pool, "bindless set");
+
     {
         var dii: [self.textures.len + self.skybox_textures.len]vk.DescriptorImageInfo = undefined;
         for (self.textures) |t, i| {

@@ -2,7 +2,8 @@ const std = @import("std");
 const vk = @import("vulkan");
 const tex = @import("texture.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
-const ShaderBinding = @import("ShaderBinding.zig");
+const DescriptorLayout = @import("DescriptorLayout.zig");
+const Shader = @import("Shader.zig");
 const Pipeline = @import("Pipeline.zig");
 const Options = Pipeline.Options;
 
@@ -17,12 +18,15 @@ label: ?[*:0]const u8,
 const Self = @This();
 
 pub fn init(
+    allocator: std.mem.Allocator,
     gc: GraphicsContext,
     extent: vk.Extent2D,
-    shader_binding: ShaderBinding,
+    shaders: []Shader,
     format: vk.Format,
     push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
+    bindless: DescriptorLayout,
+    immutable_sampler: DescriptorLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var renderer: Self = undefined;
@@ -33,11 +37,14 @@ pub fn init(
     renderer.render_pass = try createRenderPass(gc, format, opts, label);
 
     renderer.pipeline = try Pipeline.createBasicPipeline(
+        allocator,
         gc,
         renderer.render_pass,
-        shader_binding,
+        shaders,
         push_constants,
         opts,
+        bindless,
+        immutable_sampler,
         label,
     );
     renderer.depth = try tex.Texture.createDepthStencilTexture(
@@ -137,20 +144,20 @@ fn updateSize(self: *Self, gc: GraphicsContext, width: u32, height: u32) !void {
     self.extent.height = height;
 
     self.depth.deinit(gc);
-        self.depth = try tex.Texture.createDepthStencilTexture(
-            gc,
-            self.extent.width,
-            self.extent.height,
-            self.label,
-        );
+    self.depth = try tex.Texture.createDepthStencilTexture(
+        gc,
+        self.extent.width,
+        self.extent.height,
+        self.label,
+    );
     self.msaa.deinit(gc);
-        self.msaa = try tex.Texture.createRenderTexture(
-            gc,
-            self.extent.width,
-            self.extent.height,
-            self.format,
-            self.label,
-        );
+    self.msaa = try tex.Texture.createRenderTexture(
+        gc,
+        self.extent.width,
+        self.extent.height,
+        self.format,
+        self.label,
+    );
 }
 
 fn createRenderPass(gc: GraphicsContext, format: vk.Format, opts: Options, label: ?[*:0]const u8) !vk.RenderPass {
@@ -216,7 +223,7 @@ fn createRenderPass(gc: GraphicsContext, format: vk.Format, opts: Options, label
         //Depth
         .p_depth_stencil_attachment = &.{
             .attachment = 1,
-            .layout = .attachment_optimal_khr,
+            .layout = .attachment_optimal,
         },
         .preserve_attachment_count = 0,
         .p_preserve_attachments = undefined,
