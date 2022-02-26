@@ -12,6 +12,7 @@ const Texture = tex.Texture;
 const Shader = @import("Shader.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
 const DescriptorLayout = @import("DescriptorLayout.zig");
+const PipelineLayout = @import("PipelineLayout.zig");
 const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
@@ -133,6 +134,7 @@ camera: Camera,
 ubo_buffers: []Buffer,
 uniform_des: DescriptorLayout,
 template: vk.DescriptorUpdateTemplate,
+pipeline_layout: PipelineLayout,
 index_buffer: Buffer,
 descriptor_pool: vk.DescriptorPool,
 bindless_sets: vk.DescriptorSet,
@@ -221,25 +223,30 @@ pub fn init(allocator: std.mem.Allocator) !Self {
 
     // Define the push constant range used by the pipeline layout
     // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
-    const push_constant = [_]vk.PushConstantRange{.{
+    const push_constant = vk.PushConstantRange{
         .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstant),
-    }};
+    };
+
+    self.pipeline_layout = try PipelineLayout.init(
+        self.gc,
+        &.{ bindless, immutable, self.uniform_des },
+        push_constant,
+        "pipeline layout" ++ srcToString(@src()),
+    );
+
     self.renderer = try BasicRenderer.init(
         self.gc,
         self.swapchain.extent,
         &.{ vert_shader, frag_shader },
         self.swapchain.surface_format.format,
-        &push_constant,
         .{},
-        bindless,
-        immutable,
-        self.uniform_des,
+        self.pipeline_layout,
         "basic pipeline " ++ srcToString(@src()),
     );
 
-    self.template = try self.uniform_des.createDescriptorTemplate(self.gc, self.renderer.pipeline.pipeline_layout, 2);
+    self.template = try self.uniform_des.createDescriptorTemplate(self.gc, self.pipeline_layout, 2);
     self.framebuffers = try createFramebuffers(self.gc, allocator, self.swapchain, &self.renderer, srcToString(@src()));
     //*********************************
 
@@ -328,11 +335,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.gc,
         self.renderer.render_pass,
         &.{ skybox_vert, skybox_frag },
-        &push_constant,
         .{},
-        bindless,
-        immutable,
-        self.uniform_des,
+        self.pipeline_layout,
         "skybox " ++ srcToString(@src()),
     );
     // ============================================
@@ -376,7 +380,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const pool_sizes = [_]vk.DescriptorPoolSize{
         .{
             .@"type" = .sampled_image,
-            .descriptor_count = 64,
+            .descriptor_count = bindless.total,
         },
         .{
             .@"type" = .sampler,
@@ -400,7 +404,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         var dii: [self.textures.len + self.skybox_textures.len]vk.DescriptorImageInfo = undefined;
         for (self.textures) |t, i| {
             dii[i] = .{
-                .sampler = undefined,
+                .sampler = .null_handle,
                 .image_view = t.view,
                 .image_layout = t.image.layout,
             };
@@ -409,7 +413,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
             const i = index + self.textures.len;
 
             dii[i] = .{
-                .sampler = undefined,
+                .sampler = .null_handle,
                 .image_view = t.view,
                 .image_layout = t.image.layout,
             };
@@ -465,6 +469,7 @@ pub fn deinit(self: *Self) void {
     self.allocator.free(self.ubo_buffers);
     self.skybox_pipeline.deinit(self.gc);
     self.uniform_des.deinit(self.gc);
+    self.pipeline_layout.deinit(self.gc);
     self.gc.destroy(self.template);
     for (self.skybox_textures) |texture| {
         texture.deinit(self.gc);
@@ -523,43 +528,23 @@ pub fn run(self: *Self) !void {
 
             self.vertex_buffer.bind(self.gc, cmdbuf, Vertex.Buffer.zero_offsets);
             self.gc.vkd.cmdBindIndexBuffer(cmdbuf, self.index_buffer.buffer, 0, .uint32);
-            self.gc.vkd.cmdBindDescriptorSets(
+            self.pipeline_layout.bindDescriptorSet(
+                self.gc,
                 cmdbuf,
                 .graphics,
-                self.renderer.pipeline.pipeline_layout,
                 0,
-                2,
                 &[_]vk.DescriptorSet{ self.bindless_sets, self.immutable_sampler_set },
-                0,
-                undefined,
             );
-
-            self.renderer.pipeline.pushConstant(self.gc, cmdbuf, .{ .fragment_bit = true }, self.object_push_constant);
-            self.gc.vkd.cmdPushDescriptorSetWithTemplateKHR(
-                cmdbuf,
-                self.template,
-                self.renderer.pipeline.pipeline_layout,
-                2,
-                @ptrCast(*const anyopaque, &[_]DescriptorLayout.DescriptorInfo{
-                    .{ .buffer = .{
-                        .buffer = self.ubo_buffers[i].buffer,
-                        .offset = 0,
-                        .range = self.ubo_buffers[i].create_info.size,
-                    } },
-                }),
-            );
+            self.pipeline_layout.pushConstant(self.gc, cmdbuf, self.object_push_constant);
+            self.pipeline_layout.pushDescriptorSet(self.gc, cmdbuf, self.template, 2, &.{
+                DescriptorLayout.DescriptorInfo.create(self.ubo_buffers[i]),
+            });
 
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 
             //draw skybox
             self.skybox_pipeline.bind(self.gc, cmdbuf);
-            self.skybox_pipeline.pushConstant(
-                self.gc,
-                cmdbuf,
-                .{ .fragment_bit = true },
-                self.skybox_push_constant,
-                // PushConstant{ .texture_id = push_constant[1].texture_id + 2 },
-            );
+            self.pipeline_layout.pushConstant(self.gc, cmdbuf, self.skybox_push_constant);
             self.cube.draw(self.gc, cmdbuf, self.meshs.items);
             try self.renderer.endFrame(self.gc, cmdbuf);
         }

@@ -1,11 +1,13 @@
 layout: vk.DescriptorSetLayout,
 info: BindingInfo,
-template: vk.DescriptorUpdateTemplate,
 total: u32,
 
 const std = @import("std");
 const vk = @import("vulkan");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
+const PipelineLayout = @import("PipelineLayout.zig");
+const Image = @import("Image.zig");
+const Buffer = @import("Buffer.zig");
 const Self = @This();
 
 const capacity = 8;
@@ -51,7 +53,6 @@ pub fn init(gc: GraphicsContext, info: BindingInfo, label: ?[*:0]const u8) !Self
     var self: Self = undefined;
     self.total = 0;
     self.info = info;
-    self.template = .null_handle;
 
     var combine_binding: std.BoundedArray(vk.DescriptorSetLayoutBinding, capacity) = .{};
     switch (info) {
@@ -76,15 +77,13 @@ pub fn init(gc: GraphicsContext, info: BindingInfo, label: ?[*:0]const u8) !Self
                     .stage_flags = binding.stage,
                     .p_immutable_samplers = null,
                 }) catch unreachable;
-                self.total += 1;
             }
         },
         .immutable_sampler => |is| {
-            self.total += @truncate(u32, is.samplers.len);
             combine_binding.append(.{
                 .binding = is.binding,
                 .descriptor_type = .sampler,
-                .descriptor_count = self.total,
+                .descriptor_count = @truncate(u32, is.samplers.len),
                 .stage_flags = is.stage,
                 .p_immutable_samplers = is.samplers.ptr,
             }) catch unreachable;
@@ -133,9 +132,28 @@ pub fn createDescriptorSet(self: Self, gc: GraphicsContext, pool: vk.DescriptorP
 pub const DescriptorInfo = union(enum) {
     image: vk.DescriptorImageInfo,
     buffer: vk.DescriptorBufferInfo,
+
+    pub fn create(resource: anytype) DescriptorInfo {
+        const T = @TypeOf(resource);
+        if (T == Buffer) {
+            return .{ .buffer = .{
+                .buffer = resource.buffer,
+                .offset = 0,
+                .range = resource.create_info.size,
+            } };
+        }
+        if (T == Image) {
+            return .{ .image = .{
+                .sampler = .null_handle,
+                .image_view = resource.view,
+                .image_layout = resource.image.layout,
+            } };
+        }
+        @compileError("expect Buffer or Image but get " ++ @typeName(T));
+    }
 };
 
-pub fn createDescriptorTemplate(self: Self, gc: GraphicsContext, pipeline_layout: vk.PipelineLayout, set: u32) !vk.DescriptorUpdateTemplate {
+pub fn createDescriptorTemplate(self: Self, gc: GraphicsContext, pipeline_layout: PipelineLayout, set: u32) !vk.DescriptorUpdateTemplate {
     var combine_entry: std.BoundedArray(vk.DescriptorUpdateTemplateEntry, capacity) = .{};
     switch (self.info) {
         .template => |bindings| {
@@ -160,7 +178,7 @@ pub fn createDescriptorTemplate(self: Self, gc: GraphicsContext, pipeline_layout
         .template_type = .push_descriptors_khr,
         .descriptor_set_layout = self.layout,
         .pipeline_bind_point = .graphics,
-        .pipeline_layout = pipeline_layout,
+        .pipeline_layout = pipeline_layout.layout,
         .set = set,
     }, "update template");
 }

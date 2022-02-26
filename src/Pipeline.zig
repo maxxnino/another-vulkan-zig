@@ -4,14 +4,10 @@ const tex = @import("texture.zig");
 const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const DescriptorLayout = @import("DescriptorLayout.zig");
 const Shader = @import("Shader.zig");
+const PipelineLayout = @import("PipelineLayout.zig");
 const Self = @This();
 
 pipeline: vk.Pipeline,
-descriptor_set_layout: vk.DescriptorSetLayout,
-bindless_set_layout: vk.DescriptorSetLayout,
-immutable_sampler_set_layout: vk.DescriptorSetLayout,
-pipeline_layout: vk.PipelineLayout,
-descriptor_template: vk.DescriptorUpdateTemplate,
 
 pub const Options = struct {
     msaa: bool = true,
@@ -22,29 +18,11 @@ pub fn createSkyboxPipeline(
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
     shaders: []Shader,
-    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
-    bindless: DescriptorLayout,
-    immutable_sampler: DescriptorLayout,
-    uniform_des: DescriptorLayout,
+    pipeline_layout: PipelineLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var self: Self = undefined;
-    self.immutable_sampler_set_layout = immutable_sampler.layout;
-    self.bindless_set_layout = bindless.layout;
-    self.descriptor_set_layout = uniform_des.layout;
-
-    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
-        .flags = .{},
-        .set_layout_count = 3,
-        .p_set_layouts = &[_]vk.DescriptorSetLayout{
-            self.bindless_set_layout,
-            self.immutable_sampler_set_layout,
-            self.descriptor_set_layout,
-        },
-        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
-        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
-    }, label);
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -146,7 +124,7 @@ pub fn createSkyboxPipeline(
         .p_depth_stencil_state = &pdssci,
         .p_color_blend_state = &pcbsci,
         .p_dynamic_state = &pdsci,
-        .layout = self.pipeline_layout,
+        .layout = pipeline_layout.layout,
         .render_pass = render_pass,
         .subpass = 0,
         .base_pipeline_handle = .null_handle,
@@ -161,29 +139,11 @@ pub fn createBasicPipeline(
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
     shaders: []Shader,
-    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
-    bindless: DescriptorLayout,
-    immutable_sampler: DescriptorLayout,
-    uniform_des: DescriptorLayout,
+    pipeline_layout: PipelineLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var self: Self = undefined;
-    self.immutable_sampler_set_layout = immutable_sampler.layout;
-    self.bindless_set_layout = bindless.layout;
-    self.descriptor_set_layout = uniform_des.layout;
-
-    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
-        .flags = .{},
-        .set_layout_count = 3,
-        .p_set_layouts = &[_]vk.DescriptorSetLayout{
-            self.bindless_set_layout,
-            self.immutable_sampler_set_layout,
-            self.descriptor_set_layout,
-        },
-        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
-        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
-    }, label);
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -286,7 +246,7 @@ pub fn createBasicPipeline(
         .p_depth_stencil_state = &pdssci,
         .p_color_blend_state = &pcbsci,
         .p_dynamic_state = &pdsci,
-        .layout = self.pipeline_layout,
+        .layout = pipeline_layout.layout,
         .render_pass = render_pass,
         .subpass = 0,
         .base_pipeline_handle = .null_handle,
@@ -302,20 +262,6 @@ pub fn bind(self: Self, gc: GraphicsContext, command_buffer: vk.CommandBuffer) v
     gc.vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
 }
 
-pub fn pushConstant(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, stage: vk.ShaderStageFlags, data: anytype) void {
-    const size = @sizeOf(@TypeOf(data));
-    std.debug.assert(size <= gc.props.limits.max_push_constants_size);
-    gc.vkd.cmdPushConstants(
-        cmdbuf,
-        self.pipeline_layout,
-        stage,
-        0,
-        size,
-        @ptrCast(*const anyopaque, &data),
-    );
-}
-
 pub fn deinit(self: Self, gc: GraphicsContext) void {
-    gc.destroy(self.pipeline_layout);
     gc.destroy(self.pipeline);
 }

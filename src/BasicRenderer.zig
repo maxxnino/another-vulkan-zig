@@ -5,6 +5,7 @@ const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const DescriptorLayout = @import("DescriptorLayout.zig");
 const Shader = @import("Shader.zig");
 const Pipeline = @import("Pipeline.zig");
+const PipelineLayout = @import("PipelineLayout.zig");
 const Options = Pipeline.Options;
 
 pipeline: Pipeline,
@@ -22,11 +23,8 @@ pub fn init(
     extent: vk.Extent2D,
     shaders: []Shader,
     format: vk.Format,
-    push_constants: ?[]const vk.PushConstantRange,
     opts: Options,
-    bindless: DescriptorLayout,
-    immutable_sampler: DescriptorLayout,
-    uniform_des: DescriptorLayout,
+    pipeline_layout: PipelineLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var renderer: Self = undefined;
@@ -40,11 +38,8 @@ pub fn init(
         gc,
         renderer.render_pass,
         shaders,
-        push_constants,
         opts,
-        bindless,
-        immutable_sampler,
-        uniform_des,
+        pipeline_layout,
         label,
     );
     renderer.depth = try tex.Texture.createDepthStencilTexture(
