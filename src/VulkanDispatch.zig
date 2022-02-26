@@ -99,6 +99,8 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .destroySampler = true,
     .createDescriptorPool = true,
     .destroyDescriptorPool = true,
+    .createDescriptorUpdateTemplate = true,
+    .destroyDescriptorUpdateTemplate = true,
     .allocateDescriptorSets = true,
     .updateDescriptorSets = true,
     .beginCommandBuffer = true,
@@ -123,7 +125,8 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdBindVertexBuffers = true,
     .cmdBindDescriptorSets = true,
     .cmdPipelineBarrier2 = true,
-    .cmdPushDescriptorSetKHR = true,
+    // .cmdPushDescriptorSetKHR = true,
+    .cmdPushDescriptorSetWithTemplateKHR = true,
 });
 
 pub fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VulkanFunctions {

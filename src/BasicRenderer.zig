@@ -18,7 +18,6 @@ label: ?[*:0]const u8,
 const Self = @This();
 
 pub fn init(
-    allocator: std.mem.Allocator,
     gc: GraphicsContext,
     extent: vk.Extent2D,
     shaders: []Shader,
@@ -27,6 +26,7 @@ pub fn init(
     opts: Options,
     bindless: DescriptorLayout,
     immutable_sampler: DescriptorLayout,
+    uniform_des: DescriptorLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var renderer: Self = undefined;
@@ -37,7 +37,6 @@ pub fn init(
     renderer.render_pass = try createRenderPass(gc, format, opts, label);
 
     renderer.pipeline = try Pipeline.createBasicPipeline(
-        allocator,
         gc,
         renderer.render_pass,
         shaders,
@@ -45,6 +44,7 @@ pub fn init(
         opts,
         bindless,
         immutable_sampler,
+        uniform_des,
         label,
     );
     renderer.depth = try tex.Texture.createDepthStencilTexture(
@@ -215,16 +215,16 @@ fn createRenderPass(gc: GraphicsContext, format: vk.Format, opts: Options, label
             .attachment = 0,
             .layout = .color_attachment_optimal,
         }},
-        //Resovle output
-        .p_resolve_attachments = &[_]vk.AttachmentReference{.{
-            .attachment = 2,
-            .layout = .color_attachment_optimal,
-        }},
         //Depth
         .p_depth_stencil_attachment = &.{
             .attachment = 1,
             .layout = .attachment_optimal,
         },
+        //Resovle output
+        .p_resolve_attachments = &[_]vk.AttachmentReference{.{
+            .attachment = 2,
+            .layout = .color_attachment_optimal,
+        }},
         .preserve_attachment_count = 0,
         .p_preserve_attachments = undefined,
     };

@@ -1,5 +1,6 @@
 layout: vk.DescriptorSetLayout,
-descriptor_type: DescriptorType,
+info: BindingInfo,
+template: vk.DescriptorUpdateTemplate,
 total: u32,
 
 const std = @import("std");
@@ -17,18 +18,24 @@ const bindless_flags = [_]vk.DescriptorBindingFlags{.{
 
 pub const DescriptorType = enum {
     bindless,
-    normal,
+    template,
     immutable_sampler,
 };
 
 pub const BindingInfo = union(DescriptorType) {
-    bindless: []const BindlessAndNormal,
-    normal: []const BindlessAndNormal,
+    bindless: []const Bindless,
+    template: []const Template,
     immutable_sampler: ImmutableSampler,
 
-    pub const BindlessAndNormal = struct {
+    pub const Bindless = struct {
         binding: u32,
         count: u32,
+        stage: vk.ShaderStageFlags,
+        des_type: vk.DescriptorType,
+    };
+
+    pub const Template = struct {
+        binding: u32,
         stage: vk.ShaderStageFlags,
         des_type: vk.DescriptorType,
     };
@@ -43,6 +50,8 @@ pub const BindingInfo = union(DescriptorType) {
 pub fn init(gc: GraphicsContext, info: BindingInfo, label: ?[*:0]const u8) !Self {
     var self: Self = undefined;
     self.total = 0;
+    self.info = info;
+    self.template = .null_handle;
 
     var combine_binding: std.BoundedArray(vk.DescriptorSetLayoutBinding, capacity) = .{};
     switch (info) {
@@ -57,24 +66,21 @@ pub fn init(gc: GraphicsContext, info: BindingInfo, label: ?[*:0]const u8) !Self
                 }) catch unreachable;
                 self.total += binding.count;
             }
-            self.descriptor_type = .bindless;
         },
-        .normal => |bindings| {
+        .template => |bindings| {
             for (bindings) |binding| {
                 combine_binding.append(.{
                     .binding = binding.binding,
                     .descriptor_type = binding.des_type,
-                    .descriptor_count = binding.count,
+                    .descriptor_count = 1,
                     .stage_flags = binding.stage,
                     .p_immutable_samplers = null,
                 }) catch unreachable;
-                self.total += binding.count;
+                self.total += 1;
             }
-            self.descriptor_type = .normal;
         },
         .immutable_sampler => |is| {
             self.total += @truncate(u32, is.samplers.len);
-            self.descriptor_type = .immutable_sampler;
             combine_binding.append(.{
                 .binding = is.binding,
                 .descriptor_type = .sampler,
@@ -88,10 +94,10 @@ pub fn init(gc: GraphicsContext, info: BindingInfo, label: ?[*:0]const u8) !Self
     const binding_slice = combine_binding.slice();
 
     self.layout = try gc.create(vk.DescriptorSetLayoutCreateInfo{
-        .flags = .{},
+        .flags = if (info == .template) .{ .push_descriptor_bit_khr = true } else .{},
         .binding_count = @truncate(u32, binding_slice.len),
         .p_bindings = binding_slice.ptr,
-        .p_next = if (self.descriptor_type == .bindless) @ptrCast(*const anyopaque, &vk.DescriptorSetLayoutBindingFlagsCreateInfo{
+        .p_next = if (info == .bindless) @ptrCast(*const anyopaque, &vk.DescriptorSetLayoutBindingFlagsCreateInfo{
             .binding_count = @truncate(u32, binding_slice.len),
             .p_binding_flags = &bindless_flags,
         }) else null,
@@ -109,7 +115,7 @@ pub fn createDescriptorSet(self: Self, gc: GraphicsContext, pool: vk.DescriptorP
         .descriptor_pool = pool,
         .descriptor_set_count = 1,
         .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.layout),
-        .p_next = if (self.descriptor_type == .bindless)
+        .p_next = if (self.info == .bindless)
             @ptrCast(*const anyopaque, &vk.DescriptorSetVariableDescriptorCountAllocateInfo{
                 .descriptor_set_count = 1,
                 .p_descriptor_counts = &[_]u32{self.total},
@@ -122,4 +128,39 @@ pub fn createDescriptorSet(self: Self, gc: GraphicsContext, pool: vk.DescriptorP
     try gc.vkd.allocateDescriptorSets(gc.dev, &dsai, @ptrCast([*]vk.DescriptorSet, &descriptor_set));
     try gc.markHandle(descriptor_set, .descriptor_set, label);
     return descriptor_set;
+}
+
+pub const DescriptorInfo = union(enum) {
+    image: vk.DescriptorImageInfo,
+    buffer: vk.DescriptorBufferInfo,
+};
+
+pub fn createDescriptorTemplate(self: Self, gc: GraphicsContext, pipeline_layout: vk.PipelineLayout, set: u32) !vk.DescriptorUpdateTemplate {
+    var combine_entry: std.BoundedArray(vk.DescriptorUpdateTemplateEntry, capacity) = .{};
+    switch (self.info) {
+        .template => |bindings| {
+            for (bindings) |binding, i| {
+                combine_entry.append(.{
+                    .dst_binding = binding.binding,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = binding.des_type,
+                    .offset = @sizeOf(DescriptorInfo) * i,
+                    .stride = @sizeOf(DescriptorInfo),
+                }) catch unreachable;
+            }
+        },
+        else => unreachable,
+    }
+    const slice = combine_entry.slice();
+    return gc.create(vk.DescriptorUpdateTemplateCreateInfo{
+        .flags = .{},
+        .descriptor_update_entry_count = @truncate(u32, slice.len),
+        .p_descriptor_update_entries = slice.ptr,
+        .template_type = .push_descriptors_khr,
+        .descriptor_set_layout = self.layout,
+        .pipeline_bind_point = .graphics,
+        .pipeline_layout = pipeline_layout,
+        .set = set,
+    }, "update template");
 }

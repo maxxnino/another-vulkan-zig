@@ -131,6 +131,8 @@ object_push_constant: PushConstant,
 current_mat: u32 = 0,
 camera: Camera,
 ubo_buffers: []Buffer,
+uniform_des: DescriptorLayout,
+template: vk.DescriptorUpdateTemplate,
 index_buffer: Buffer,
 descriptor_pool: vk.DescriptorPool,
 bindless_sets: vk.DescriptorSet,
@@ -177,10 +179,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "zig-cache/shaders/shaders/triangle.vert.spv",
         "main",
         .{ .vertex = Vertex.inputDescription(&.{ .position, .texcoord, .normal, .tangent }) },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
     );
     defer vert_shader.deinit(self.gc);
 
@@ -190,15 +188,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "zig-cache/shaders/shaders/triangle.frag.spv",
         "main",
         .{ .fragment = {} },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
     );
     defer frag_shader.deinit(self.gc);
 
     const bindless = try DescriptorLayout.init(self.gc, .{
-        .bindless = &[_]DescriptorLayout.BindingInfo.BindlessAndNormal{.{
+        .bindless = &[_]DescriptorLayout.BindingInfo.Bindless{.{
             .binding = 0,
             .count = 64,
             .stage = .{ .fragment_bit = true },
@@ -216,6 +210,15 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     }, "immutable " ++ srcToString(@src()));
     defer immutable.deinit(self.gc);
 
+    self.uniform_des = try DescriptorLayout.init(self.gc, .{
+        .template = &[_]DescriptorLayout.BindingInfo.Template{.{
+            .binding = 0,
+            .stage = .{ .fragment_bit = true, .vertex_bit = true },
+            .des_type = .uniform_buffer,
+        }},
+    }, "uniform " ++ srcToString(@src()));
+    // defer uniform_des.deinit(self.gc);
+
     // Define the push constant range used by the pipeline layout
     // Note that the spec only requires a minimum of 128 bytes, so for passing larger blocks of data you'd use UBOs or SSBOs
     const push_constant = [_]vk.PushConstantRange{.{
@@ -224,7 +227,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .size = @sizeOf(PushConstant),
     }};
     self.renderer = try BasicRenderer.init(
-        allocator,
         self.gc,
         self.swapchain.extent,
         &.{ vert_shader, frag_shader },
@@ -233,9 +235,11 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .{},
         bindless,
         immutable,
+        self.uniform_des,
         "basic pipeline " ++ srcToString(@src()),
     );
 
+    self.template = try self.uniform_des.createDescriptorTemplate(self.gc, self.renderer.pipeline.pipeline_layout, 2);
     self.framebuffers = try createFramebuffers(self.gc, allocator, self.swapchain, &self.renderer, srcToString(@src()));
     //*********************************
 
@@ -308,10 +312,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "zig-cache/shaders/shaders/texturecubemap/skybox.vert.spv",
         "main",
         .{ .vertex = Vertex.inputDescription(&.{.position}) },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
     );
     defer skybox_vert.deinit(self.gc);
 
@@ -321,15 +321,10 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         "zig-cache/shaders/shaders/texturecubemap/skybox.frag.spv",
         "main",
         .{ .fragment = {} },
-        &[_]Shader.DescriptorBindingLayout{.{
-            .binding = 0,
-            .descriptor_type = .uniform_buffer,
-        }},
     );
     defer skybox_frag.deinit(self.gc);
 
     self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
-        allocator,
         self.gc,
         self.renderer.render_pass,
         &.{ skybox_vert, skybox_frag },
@@ -337,6 +332,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .{},
         bindless,
         immutable,
+        self.uniform_des,
         "skybox " ++ srcToString(@src()),
     );
     // ============================================
@@ -468,6 +464,8 @@ pub fn deinit(self: *Self) void {
     }
     self.allocator.free(self.ubo_buffers);
     self.skybox_pipeline.deinit(self.gc);
+    self.uniform_des.deinit(self.gc);
+    self.gc.destroy(self.template);
     for (self.skybox_textures) |texture| {
         texture.deinit(self.gc);
     }
@@ -536,24 +534,20 @@ pub fn run(self: *Self) !void {
                 undefined,
             );
 
-            const wds = [_]vk.WriteDescriptorSet{
-                .{
-                    .dst_set = .null_handle,
-                    .dst_binding = 0,
-                    .dst_array_element = 0,
-                    .descriptor_count = 1,
-                    .descriptor_type = .uniform_buffer,
-                    .p_image_info = undefined,
-                    .p_buffer_info = &[_]vk.DescriptorBufferInfo{.{
+            self.renderer.pipeline.pushConstant(self.gc, cmdbuf, .{ .fragment_bit = true }, self.object_push_constant);
+            self.gc.vkd.cmdPushDescriptorSetWithTemplateKHR(
+                cmdbuf,
+                self.template,
+                self.renderer.pipeline.pipeline_layout,
+                2,
+                @ptrCast(*const anyopaque, &[_]DescriptorLayout.DescriptorInfo{
+                    .{ .buffer = .{
                         .buffer = self.ubo_buffers[i].buffer,
                         .offset = 0,
                         .range = self.ubo_buffers[i].create_info.size,
-                    }},
-                    .p_texel_buffer_view = undefined,
-                },
-            };
-            self.renderer.pipeline.pushConstant(self.gc, cmdbuf, .{ .fragment_bit = true }, self.object_push_constant);
-            self.gc.vkd.cmdPushDescriptorSetKHR(cmdbuf, .graphics, self.renderer.pipeline.pipeline_layout, 2, 1, &wds);
+                    } },
+                }),
+            );
 
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 

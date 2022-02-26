@@ -18,15 +18,22 @@ pub const Options = struct {
     ssaa: bool = true,
 };
 
-fn createLayout(
-    self: *Self,
-    allocator: std.mem.Allocator,
+pub fn createSkyboxPipeline(
     gc: GraphicsContext,
+    render_pass: vk.RenderPass,
     shaders: []Shader,
     push_constants: ?[]const vk.PushConstantRange,
+    opts: Options,
+    bindless: DescriptorLayout,
+    immutable_sampler: DescriptorLayout,
+    uniform_des: DescriptorLayout,
     label: ?[*:0]const u8,
-) !void {
-    self.descriptor_set_layout = try Shader.createDescriptorSetLayout(allocator, gc, shaders, label);
+) !Self {
+    var self: Self = undefined;
+    self.immutable_sampler_set_layout = immutable_sampler.layout;
+    self.bindless_set_layout = bindless.layout;
+    self.descriptor_set_layout = uniform_des.layout;
+
     self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
         .flags = .{},
         .set_layout_count = 3,
@@ -38,24 +45,6 @@ fn createLayout(
         .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
         .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
     }, label);
-}
-
-pub fn createSkyboxPipeline(
-    allocator: std.mem.Allocator,
-    gc: GraphicsContext,
-    render_pass: vk.RenderPass,
-    shaders: []Shader,
-    push_constants: ?[]const vk.PushConstantRange,
-    opts: Options,
-    bindless: DescriptorLayout,
-    immutable_sampler: DescriptorLayout,
-    label: ?[*:0]const u8,
-) !Self {
-    var self: Self = undefined;
-    self.immutable_sampler_set_layout = immutable_sampler.layout;
-    self.bindless_set_layout = bindless.layout;
-
-    try self.createLayout(allocator, gc, shaders, push_constants, label);
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -169,7 +158,6 @@ pub fn createSkyboxPipeline(
     return self;
 }
 pub fn createBasicPipeline(
-    allocator: std.mem.Allocator,
     gc: GraphicsContext,
     render_pass: vk.RenderPass,
     shaders: []Shader,
@@ -177,13 +165,25 @@ pub fn createBasicPipeline(
     opts: Options,
     bindless: DescriptorLayout,
     immutable_sampler: DescriptorLayout,
+    uniform_des: DescriptorLayout,
     label: ?[*:0]const u8,
 ) !Self {
     var self: Self = undefined;
     self.immutable_sampler_set_layout = immutable_sampler.layout;
     self.bindless_set_layout = bindless.layout;
+    self.descriptor_set_layout = uniform_des.layout;
 
-    try self.createLayout(allocator, gc, shaders, push_constants, label);
+    self.pipeline_layout = try gc.create(vk.PipelineLayoutCreateInfo{
+        .flags = .{},
+        .set_layout_count = 3,
+        .p_set_layouts = &[_]vk.DescriptorSetLayout{
+            self.bindless_set_layout,
+            self.immutable_sampler_set_layout,
+            self.descriptor_set_layout,
+        },
+        .push_constant_range_count = if (push_constants) |p| @truncate(u32, p.len) else 0,
+        .p_push_constant_ranges = if (push_constants) |p| p.ptr else undefined,
+    }, label);
 
     const piasci = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -316,7 +316,6 @@ pub fn pushConstant(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, s
 }
 
 pub fn deinit(self: Self, gc: GraphicsContext) void {
-    gc.destroy(self.descriptor_set_layout);
     gc.destroy(self.pipeline_layout);
     gc.destroy(self.pipeline);
 }
