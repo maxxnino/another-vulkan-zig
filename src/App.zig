@@ -143,9 +143,11 @@ draw_pool: DrawPool,
 cube: Model,
 viking_room: Model,
 light: Light,
+gpu_time: f32,
 pub fn init(allocator: std.mem.Allocator) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
+    self.gpu_time = 0;
     basisu.init();
 
     self.window = try Window.init(app_name, false, 800, 600);
@@ -524,7 +526,7 @@ pub fn run(self: *Self) !void {
         {
             const cmdbuf = command_buffer.cmd;
             const i = self.swapchain.image_index;
-            try self.renderer.beginFrame(self.gc, self.framebuffers[i], cmdbuf);
+            try self.renderer.beginFrame(self.gc, self.framebuffers[i], cmdbuf, i, &self.gpu_time);
 
             self.vertex_buffer.bind(self.gc, cmdbuf, Vertex.Buffer.zero_offsets);
             self.gc.vkd.cmdBindIndexBuffer(cmdbuf, self.index_buffer.buffer, 0, .uint32);
@@ -546,7 +548,7 @@ pub fn run(self: *Self) !void {
             self.skybox_pipeline.bind(self.gc, cmdbuf);
             self.pipeline_layout.pushConstant(self.gc, cmdbuf, self.skybox_push_constant);
             self.cube.draw(self.gc, cmdbuf, self.meshs.items);
-            try self.renderer.endFrame(self.gc, cmdbuf);
+            try self.renderer.endFrame(self.gc, cmdbuf, i);
         }
 
         // ============= End Draw ===================
@@ -566,6 +568,9 @@ pub fn run(self: *Self) !void {
             self.framebuffers = try createFramebuffers(self.gc, self.allocator, self.swapchain, &self.renderer, srcToString(@src()));
             try self.draw_pool.resetAll(self.gc);
         }
+        var buffer: [30:0]u8 = undefined;
+        const str = try std.fmt.bufPrintZ(&buffer, "Gpu: {d:.2} ms", .{self.gpu_time});
+        try self.window.window.setTitle(str.ptr);
     }
     try self.swapchain.waitForAllFences(self.gc);
 }

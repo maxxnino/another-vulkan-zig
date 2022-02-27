@@ -125,8 +125,14 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdBindVertexBuffers = true,
     .cmdBindDescriptorSets = true,
     .cmdPipelineBarrier2 = true,
-    // .cmdPushDescriptorSetKHR = true,
     .cmdPushDescriptorSetWithTemplateKHR = true,
+
+    //query
+    .createQueryPool = true,
+    .destroyQueryPool = true,
+    .getQueryPoolResults = true,
+    .cmdWriteTimestamp = true,
+    .cmdResetQueryPool = true,
 });
 
 pub fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.VulkanFunctions {

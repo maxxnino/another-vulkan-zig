@@ -6,6 +6,7 @@ const DescriptorLayout = @import("DescriptorLayout.zig");
 const Shader = @import("Shader.zig");
 const Pipeline = @import("Pipeline.zig");
 const PipelineLayout = @import("PipelineLayout.zig");
+const QueryPool = @import("QueryPool.zig");
 const Options = Pipeline.Options;
 
 pipeline: Pipeline,
@@ -15,6 +16,7 @@ msaa: tex.Texture,
 extent: vk.Extent2D,
 format: vk.Format,
 label: ?[*:0]const u8,
+query_pool: QueryPool,
 
 const Self = @This();
 
@@ -32,6 +34,7 @@ pub fn init(
     renderer.extent = extent;
     renderer.format = format;
 
+    renderer.query_pool = try QueryPool.init(gc, 3);
     renderer.render_pass = try createRenderPass(gc, format, opts, label);
 
     renderer.pipeline = try Pipeline.createBasicPipeline(
@@ -64,13 +67,19 @@ pub fn deinit(self: Self, gc: GraphicsContext) void {
     gc.destroy(self.render_pass);
     self.depth.deinit(gc);
     self.msaa.deinit(gc);
+    self.query_pool.deinit(gc);
 }
 
-pub fn beginFrame(self: Self, gc: GraphicsContext, framebuffer: vk.Framebuffer, cmdbuf: vk.CommandBuffer) !void {
+pub fn beginFrame(self: Self, gc: GraphicsContext, framebuffer: vk.Framebuffer, cmdbuf: vk.CommandBuffer, index: u32, gpu_time: *f32) !void {
     try gc.vkd.beginCommandBuffer(cmdbuf, &.{
         .flags = .{},
         .p_inheritance_info = null,
     });
+
+    const result = try self.query_pool.start(gc, cmdbuf, index);
+    if (result > 0) {
+        gpu_time.* = gpu_time.* * 0.8 + gc.props.limits.timestamp_period * @intToFloat(f32, result) * 0.000_000_1;
+    }
 
     gc.vkd.cmdSetViewport(cmdbuf, 0, 1, &[_]vk.Viewport{.{
         .x = 0,
@@ -109,9 +118,9 @@ pub fn beginFrame(self: Self, gc: GraphicsContext, framebuffer: vk.Framebuffer, 
     self.pipeline.bind(gc, cmdbuf);
 }
 
-pub fn endFrame(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer) !void {
-    _ = self;
+pub fn endFrame(self: Self, gc: GraphicsContext, cmdbuf: vk.CommandBuffer, index: u32) !void {
     gc.vkd.cmdEndRenderPass(cmdbuf);
+    self.query_pool.end(gc, cmdbuf, index);
     return gc.vkd.endCommandBuffer(cmdbuf);
 }
 
