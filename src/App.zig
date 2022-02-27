@@ -492,6 +492,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
+    var timer = try std.time.Timer.start();
+    var cpu_time: f64 = 0;
     while (self.window.pollEvents()) {
         if (self.window.isKey(.q, .just_press)) break;
         const dt = @intToFloat(f32, self.timer.lap()) / @intToFloat(f32, std.time.ns_per_s);
@@ -568,8 +570,9 @@ pub fn run(self: *Self) !void {
             self.framebuffers = try createFramebuffers(self.gc, self.allocator, self.swapchain, &self.renderer, srcToString(@src()));
             try self.draw_pool.resetAll(self.gc);
         }
-        var buffer: [30:0]u8 = undefined;
-        const str = try std.fmt.bufPrintZ(&buffer, "Gpu: {d:.2} ms", .{self.gpu_time});
+        cpu_time = cpu_time * 0.8 + @intToFloat(f64, timer.lap()) * 0.000_000_1;
+        var buffer: [64]u8 = undefined;
+        const str = try std.fmt.bufPrintZ(&buffer, "Vulkan - Cpu: {d:.2}ms, Gpu: {d:.2}ms", .{ cpu_time, self.gpu_time });
         try self.window.window.setTitle(str.ptr);
     }
     try self.swapchain.waitForAllFences(self.gc);
