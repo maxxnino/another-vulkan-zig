@@ -143,11 +143,9 @@ draw_pool: DrawPool,
 cube: Model,
 viking_room: Model,
 light: Light,
-gpu_time: f32,
 pub fn init(allocator: std.mem.Allocator) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
-    self.gpu_time = 0;
     basisu.init();
 
     self.window = try Window.init(app_name, false, 800, 600);
@@ -157,7 +155,17 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     self.vertices = Vertex.MultiArrayList{};
     self.meshs = std.ArrayList(Mesh).init(allocator);
     appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/SciFiHelmet/SciFiHelmet_fast.gltf");
-    // appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/cube_fast.gltf");
+    // appendGltfModel(allocator, &self.meshs, &self.vertices, &self.indices, "assets/plane_fast.gltf");
+    // {
+    //     // 0,1,2,0,2,3
+    //     var temp = self.vertices.items(.texcoord);
+    //     const Vec = z.Vector2(u16);
+    //     const max = std.math.maxInt(u16);
+    //     temp[0] = Vec.new(max,max);
+    //     temp[1] = Vec.new(max,0);
+    //     temp[2] = Vec.new(0,0);
+    //     temp[3] = Vec.new(0,max);
+    // }
     self.viking_room = Model{
         .mesh_begin = 0,
         .mesh_end = @truncate(u32, self.meshs.items.len),
@@ -253,24 +261,36 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     //*********************************
 
     self.textures = [_]Texture{
-        try Texture.loadFromMemory(self.gc, .srgb, &[_]u8{ 240, 161, 80, 255 }, 1, 1, 4, .{}, "default texture"),
+        try Texture.loadFromMemory(self.gc, .unorm, &[_]u8{ 0, 0, 0, 255 }, 1, 1, 4, .{}, "default texture"),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
-            .srgb,
+            .unorm,
             "assets/SciFiHelmet/SciFiHelmet_BaseColor.basis",
         ),
+        // try Texture.loadCompressFromFile(
+        //     allocator,
+        //     self.gc,
+        //     .srgb,
+        //     "assets/gamma.basis",
+        // ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
             .unorm,
             "assets/SciFiHelmet/SciFiHelmet_Normal.basis",
         ),
+        // try Texture.loadCompressFromFile(
+        //     allocator,
+        //     self.gc,
+        //     .unorm,
+        //     "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.basis",
+        // ),
         try Texture.loadCompressFromFile(
             allocator,
             self.gc,
             .unorm,
-            "assets/SciFiHelmet/SciFiHelmet_MetallicRoughness.basis",
+            "assets/SciFiHelmet/mrao.basis",
         ),
         try Texture.loadCompressFromFile(
             allocator,
@@ -494,6 +514,7 @@ pub fn deinit(self: *Self) void {
 pub fn run(self: *Self) !void {
     var timer = try std.time.Timer.start();
     var cpu_time: f64 = 0;
+    var gpu_time: f32 = 0;
     while (self.window.pollEvents()) {
         if (self.window.isKey(.q, .just_press)) break;
         const dt = @intToFloat(f32, self.timer.lap()) / @intToFloat(f32, std.time.ns_per_s);
@@ -528,7 +549,7 @@ pub fn run(self: *Self) !void {
         {
             const cmdbuf = command_buffer.cmd;
             const i = self.swapchain.image_index;
-            try self.renderer.beginFrame(self.gc, self.framebuffers[i], cmdbuf, i, &self.gpu_time);
+            try self.renderer.beginFrame(self.gc, self.framebuffers[i], cmdbuf, i, &gpu_time);
 
             self.vertex_buffer.bind(self.gc, cmdbuf, Vertex.Buffer.zero_offsets);
             self.gc.vkd.cmdBindIndexBuffer(cmdbuf, self.index_buffer.buffer, 0, .uint32);
@@ -572,7 +593,7 @@ pub fn run(self: *Self) !void {
         }
         cpu_time = cpu_time * 0.8 + @intToFloat(f64, timer.lap()) * 0.000_000_1;
         var buffer: [64]u8 = undefined;
-        const str = try std.fmt.bufPrintZ(&buffer, "Vulkan - Cpu: {d:.2}ms, Gpu: {d:.2}ms", .{ cpu_time, self.gpu_time });
+        const str = try std.fmt.bufPrintZ(&buffer, "Vulkan - Cpu: {d:.2}ms, Gpu: {d:.2}ms", .{ cpu_time, gpu_time });
         try self.window.window.setTitle(str.ptr);
     }
     try self.swapchain.waitForAllFences(self.gc);
