@@ -9,6 +9,8 @@ const BaseDispatch = VulkanDispatch.BaseDispatch;
 const InstanceDispatch = VulkanDispatch.InstanceDispatch;
 const DeviceDispatch = VulkanDispatch.DeviceDispatch;
 const Allocator = std.mem.Allocator;
+const PipelineLayout = @import("PipelineLayout.zig");
+const Shader = @import("Shader.zig");
 const enable_safety = VulkanDispatch.enable_safety;
 const srcToString = @import("util.zig").srcToString;
 
@@ -16,6 +18,7 @@ const required_device_extensions = [_][*:0]const u8{
     vk.extension_info.khr_swapchain.name,
     vk.extension_info.ext_descriptor_indexing.name,
     vk.extension_info.khr_synchronization_2.name,
+    // vk.extension_info.khr_timeline_semaphore.name,
     vk.extension_info.khr_push_descriptor.name,
 };
 
@@ -32,6 +35,7 @@ const required_device_feature = vk.PhysicalDeviceFeatures{
 
 const required_instance_layers = [_][*:0]const u8{
     "VK_LAYER_KHRONOS_synchronization2",
+    // "VK_LAYER_KHRONOS_timeline_semaphore",
 } ++ if (enable_safety) [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"} else [_][*:0]const u8{};
 
 const required_validation_features = [_]vk.ValidationFeatureEnableEXT{
@@ -120,7 +124,7 @@ pub const GraphicsContext = struct {
             .flags = .{},
             .p_next = validation_features,
             .p_application_info = &app_info,
-            .enabled_layer_count = if (enable_safety) 2 else 1,
+            .enabled_layer_count = required_instance_layers.len,
             .pp_enabled_layer_names = &required_instance_layers,
             .enabled_extension_count = @intCast(u32, instance_exts.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &instance_exts[0]),
@@ -326,6 +330,198 @@ pub const GraphicsContext = struct {
         _ = self;
         return .{ .@"4_bit" = true };
     }
+
+    pub fn createRenderpass(
+        self: GraphicsContext,
+        color: vk.AttachmentDescription,
+        depth: ?vk.AttachmentDescription,
+        resolve: ?vk.AttachmentDescription,
+        label: ?[*:0]const u8,
+    ) !vk.RenderPass {
+        const attachments = [_]vk.AttachmentDescription{
+            color,
+            depth orelse undefined,
+            resolve orelse undefined,
+        };
+        var total: u32 = 1;
+        var depth_ref: ?*const vk.AttachmentReference = null;
+        var resolve_ref: ?[*]const vk.AttachmentReference = null;
+        if (depth != null) {
+            depth_ref = &.{
+                .attachment = total,
+                .layout = .depth_stencil_attachment_optimal,
+            };
+            total += 1;
+        }
+        if (resolve != null) {
+            resolve_ref = &[_]vk.AttachmentReference{.{
+                .attachment = total,
+                .layout = .color_attachment_optimal,
+            }};
+            total += 1;
+        }
+        const subpass = vk.SubpassDescription{
+            .flags = .{},
+            .pipeline_bind_point = .graphics,
+            .input_attachment_count = 0,
+            .p_input_attachments = undefined,
+            .color_attachment_count = 1,
+            //Msaa
+            .p_color_attachments = &[_]vk.AttachmentReference{.{
+                .attachment = 0,
+                .layout = .color_attachment_optimal,
+            }},
+            //Depth
+            .p_depth_stencil_attachment = depth_ref,
+            //Resovle output
+            .p_resolve_attachments = resolve_ref,
+            .preserve_attachment_count = 0,
+            .p_preserve_attachments = undefined,
+        };
+
+        return self.create(vk.RenderPassCreateInfo{
+            .flags = .{},
+            .attachment_count = total,
+            .p_attachments = @ptrCast([*]const vk.AttachmentDescription, &attachments),
+            .subpass_count = 1,
+            .p_subpasses = @ptrCast([*]const vk.SubpassDescription, &subpass),
+            .dependency_count = 0,
+            .p_dependencies = undefined,
+            // .dependency_count = 1,
+            // .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &sd),
+        }, label);
+    }
+
+    pub fn createFramebuffer(
+        self: GraphicsContext,
+        renderpass: vk.RenderPass,
+        image_views: []vk.ImageView,
+        width: u32,
+        height: u32,
+        layers: u32,
+        label: ?[*:0]const u8,
+    ) !vk.Framebuffer {
+        return self.create(vk.FramebufferCreateInfo{
+            .flags = .{},
+            .render_pass = renderpass,
+            .attachment_count = @truncate(u32, image_views.len),
+            .p_attachments = image_views.ptr,
+            .width = width,
+            .height = height,
+            .layers = layers,
+        }, label);
+    }
+
+    pub fn beginRenderpass(
+        self: GraphicsContext,
+        render_pass: vk.RenderPass,
+        cmdbuf: vk.CommandBuffer,
+        framebuffer: vk.Framebuffer,
+        clear_value: []const vk.ClearValue,
+        viewport: vk.Viewport,
+        render_area: vk.Rect2D,
+    ) void {
+        self.vkd.cmdSetViewport(cmdbuf, 0, 1, &[_]vk.Viewport{viewport});
+        self.vkd.cmdSetScissor(cmdbuf, 0, 1, &[_]vk.Rect2D{render_area});
+        self.vkd.cmdBeginRenderPass(cmdbuf, &.{
+            .render_pass = render_pass,
+            .framebuffer = framebuffer,
+            .render_area = render_area,
+            .clear_value_count = @truncate(u32, clear_value.len),
+            .p_clear_values = clear_value.ptr,
+        }, .@"inline");
+    }
+    pub fn createPipeline(gc: GraphicsContext, desc: PipelineDesc) !vk.Pipeline {
+        const pmsci = vk.PipelineMultisampleStateCreateInfo{
+            .flags = .{},
+            // enable msaa
+            .rasterization_samples = if (desc.msaa) gc.getSampleCount() else .{ .@"1_bit" = true },
+            // enable sample shading
+            .sample_shading_enable = if (desc.ssaa) vk.TRUE else vk.FALSE,
+            .min_sample_shading = if (desc.ssaa) 0.2 else 1,
+            .p_sample_mask = null,
+            .alpha_to_coverage_enable = if (desc.alpha_to_coverage_enable) vk.TRUE else vk.FALSE,
+            .alpha_to_one_enable = vk.FALSE,
+        };
+
+        const pdssci = vk.PipelineDepthStencilStateCreateInfo{
+            .flags = .{},
+            .depth_test_enable = if (desc.depth.enable) vk.TRUE else vk.FALSE,
+            .depth_write_enable = if (desc.depth.write) vk.TRUE else vk.FALSE,
+            .depth_compare_op = desc.depth.compare_op,
+            .depth_bounds_test_enable = vk.FALSE,
+            .stencil_test_enable = if (desc.stencil.enable) vk.TRUE else vk.FALSE,
+            .front = desc.stencil.front,
+            .back = desc.stencil.back,
+            .min_depth_bounds = 0,
+            .max_depth_bounds = 1,
+        };
+        const dynamic_state = [_]vk.DynamicState{ .viewport, .scissor };
+
+        var shader_stages = std.BoundedArray(vk.PipelineShaderStageCreateInfo, 8){};
+        for (desc.shaders) |shader| {
+            try shader_stages.append(shader.getPipelineShaderStageCreateInfo());
+        }
+        const gpci = vk.GraphicsPipelineCreateInfo{
+            .flags = .{},
+            .stage_count = @truncate(u32, shader_stages.len),
+            .p_stages = shader_stages.slice().ptr,
+            .p_vertex_input_state = blk: {
+                for (desc.shaders) |shader| {
+                    if (shader.vertexInputState()) |*value| break :blk value;
+                }
+                break :blk null;
+            },
+            .p_input_assembly_state = &.{
+                .flags = .{},
+                .topology = desc.primitive_type,
+                .primitive_restart_enable = vk.FALSE,
+            },
+            .p_tessellation_state = null,
+            .p_viewport_state = &.{
+                .flags = .{},
+                .viewport_count = 1,
+                .p_viewports = undefined, // set in createCommandBuffers with cmdSetViewport
+                .scissor_count = 1,
+                .p_scissors = undefined, // set in createCommandBuffers with cmdSetScissor
+            },
+            .p_rasterization_state = &.{
+                .flags = .{},
+                .depth_clamp_enable = vk.FALSE,
+                .rasterizer_discard_enable = vk.FALSE,
+                .polygon_mode = .fill,
+                .cull_mode = desc.cull_mode,
+                .front_face = desc.face_winding,
+                .depth_bias_enable = vk.FALSE,
+                .depth_bias_constant_factor = 0,
+                .depth_bias_clamp = 0,
+                .depth_bias_slope_factor = 0,
+                .line_width = 1,
+            },
+            .p_multisample_state = &pmsci,
+            .p_depth_stencil_state = &pdssci,
+            .p_color_blend_state = &.{
+                .flags = .{},
+                .logic_op_enable = vk.FALSE,
+                .logic_op = .copy,
+                .attachment_count = @truncate(u32, desc.blends.len),
+                .p_attachments = desc.blends.ptr,
+                .blend_constants = desc.blend_color,
+            },
+            .p_dynamic_state = &.{
+                .flags = .{},
+                .dynamic_state_count = dynamic_state.len,
+                .p_dynamic_states = &dynamic_state,
+            },
+            .layout = desc.pipeline_layout.layout,
+            .render_pass = desc.render_pass,
+            .subpass = 0,
+            .base_pipeline_handle = .null_handle,
+            .base_pipeline_index = -1,
+        };
+
+        return gc.create(gpci, desc.label);
+    }
 };
 
 pub const Queue = struct {
@@ -371,8 +567,11 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
     else
         2;
 
+    // var timeline_semaphore = vk.PhysicalDeviceTimelineSemaphoreFeatures{
+    //     .timeline_semaphore = vk.TRUE,
+    // };
     var storage_16 = vk.PhysicalDevice16BitStorageFeatures{
-        // .p_next = null,
+        // .p_next = @ptrCast(*anyopaque, &timeline_semaphore),
         .storage_buffer_16_bit_access = vk.TRUE,
         .uniform_and_storage_buffer_16_bit_access = vk.TRUE,
     };
@@ -381,6 +580,7 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
         .synchronization_2 = vk.TRUE,
         .p_next = @ptrCast(*anyopaque, &storage_16),
     };
+    //enable timeline_semaphore
     const descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures{
         .p_next = @ptrCast(*anyopaque, &khr_synchronization_2),
         // .shader_input_attachment_array_dynamic_indexing= Bool32 = FALSE,
@@ -620,6 +820,56 @@ fn debugCallback(
     return vk.FALSE;
 }
 
+pub const PipelineDesc = struct {
+    primitive_type: vk.PrimitiveTopology = .triangle_list,
+    cull_mode: vk.CullModeFlags = .{ .back_bit = true },
+    face_winding: vk.FrontFace = .counter_clockwise,
+    /// msaa: off
+    msaa: bool = false,
+    /// 1 mean ssaa off, less than 1 mean ssaa on
+    ssaa: bool = false,
+    blend: bool = false,
+    depth: Depth = .{
+        .enable = true,
+        .write = true,
+        .compare_op = .less,
+        .format = .d32_sfloat_s8_uint,
+    },
+    stencil: Stencil = .{
+        .enable = false,
+        .front = std.mem.zeroes(vk.StencilOpState),
+        .back = std.mem.zeroes(vk.StencilOpState),
+    },
+    blends: []const vk.PipelineColorBlendAttachmentState = &.{.{
+        .blend_enable = vk.FALSE,
+        .src_color_blend_factor = .one,
+        .dst_color_blend_factor = .zero,
+        .color_blend_op = .add,
+        .src_alpha_blend_factor = .one,
+        .dst_alpha_blend_factor = .zero,
+        .alpha_blend_op = .add,
+        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
+    }},
+    blend_color: [4]f32 = .{ 0, 0, 0, 0 },
+    alpha_to_coverage_enable: bool = false,
+    shaders: []Shader,
+    pipeline_layout: PipelineLayout,
+    render_pass: vk.RenderPass,
+    label: ?[*:0]const u8 = null,
+
+    pub const Depth = struct {
+        enable: bool,
+        write: bool,
+        compare_op: vk.CompareOp,
+        format: vk.Format,
+    };
+
+    pub const Stencil = struct {
+        enable: bool,
+        front: vk.StencilOpState,
+        back: vk.StencilOpState,
+    };
+};
 fn printExtention(ext: vk.ExtensionProperties) void {
     printNullTerminateSlice(&ext.extension_name);
 }

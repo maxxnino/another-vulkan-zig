@@ -13,7 +13,6 @@ const Shader = @import("Shader.zig");
 const BasicRenderer = @import("BasicRenderer.zig");
 const DescriptorLayout = @import("DescriptorLayout.zig");
 const PipelineLayout = @import("PipelineLayout.zig");
-const Pipeline = @import("Pipeline.zig");
 const Model = @import("Model.zig");
 const Mesh = Model.Mesh;
 const VertexGen = @import("vertex.zig").VertexGen;
@@ -126,7 +125,7 @@ framebuffers: []vk.Framebuffer,
 vertex_buffer: Vertex.Buffer,
 textures: [5]Texture,
 skybox_textures: [1]Texture,
-skybox_pipeline: Pipeline,
+skybox_pipeline: vk.Pipeline,
 skybox_push_constant: PushConstant,
 object_push_constant: PushConstant,
 current_mat: u32 = 0,
@@ -251,7 +250,6 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         self.swapchain.extent,
         &.{ vert_shader, frag_shader },
         self.swapchain.surface_format.format,
-        .{},
         self.pipeline_layout,
         "basic pipeline " ++ srcToString(@src()),
     );
@@ -353,11 +351,10 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     );
     defer skybox_frag.deinit(self.gc);
 
-    self.skybox_pipeline = try Pipeline.createSkyboxPipeline(
+    self.skybox_pipeline = try createSkyboxPipeline(
         self.gc,
         self.renderer.render_pass,
         &.{ skybox_vert, skybox_frag },
-        .{},
         self.pipeline_layout,
         "skybox " ++ srcToString(@src()),
     );
@@ -489,7 +486,7 @@ pub fn deinit(self: *Self) void {
         ubo.deinit(self.gc);
     }
     self.allocator.free(self.ubo_buffers);
-    self.skybox_pipeline.deinit(self.gc);
+    self.gc.destroy(self.skybox_pipeline);
     self.uniform_des.deinit(self.gc);
     self.pipeline_layout.deinit(self.gc);
     self.gc.destroy(self.template);
@@ -568,7 +565,7 @@ pub fn run(self: *Self) !void {
             self.viking_room.draw(self.gc, cmdbuf, self.meshs.items);
 
             //draw skybox
-            self.skybox_pipeline.bind(self.gc, cmdbuf);
+            self.gc.vkd.cmdBindPipeline(cmdbuf, .graphics, self.skybox_pipeline);
             self.pipeline_layout.pushConstant(self.gc, cmdbuf, self.skybox_push_constant);
             self.cube.draw(self.gc, cmdbuf, self.meshs.items);
             try self.renderer.endFrame(self.gc, cmdbuf, i);
@@ -623,6 +620,30 @@ fn createFramebuffers(
 fn destroyFramebuffers(gc: *const GraphicsContext, allocator: Allocator, framebuffers: []const vk.Framebuffer) void {
     for (framebuffers) |fb| gc.vkd.destroyFramebuffer(gc.dev, fb, null);
     allocator.free(framebuffers);
+}
+
+pub fn createSkyboxPipeline(
+    gc: GraphicsContext,
+    render_pass: vk.RenderPass,
+    shaders: []Shader,
+    pipeline_layout: PipelineLayout,
+    label: ?[*:0]const u8,
+) !vk.Pipeline {
+    return gc.createPipeline(.{
+        .cull_mode = .{ .front_bit = true },
+        .face_winding = .counter_clockwise,
+        .msaa = true,
+        .depth = .{
+            .enable = true,
+            .write = false,
+            .compare_op = .less_or_equal,
+            .format = .d32_sfloat_s8_uint,
+        },
+        .shaders = shaders,
+        .pipeline_layout = pipeline_layout,
+        .render_pass = render_pass,
+        .label = label,
+    });
 }
 
 pub fn appendGltfModel(
