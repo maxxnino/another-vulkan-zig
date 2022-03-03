@@ -9,8 +9,7 @@ pitch: f32,
 yaw: f32,
 pos: Vec3,
 quat: z.Quat = z.Quat.zero(),
-z_near: f32 = 0.1,
-z_far: f32 = 100,
+z_near: f32 = 0.01,
 fov_in_degrees: f32 = 60,
 const rotate_speed: f32 = 85;
 const move_speed: f32 = 2;
@@ -21,24 +20,24 @@ pub fn getViewMatrix(self: Camera) Mat4 {
 }
 
 pub fn getProjMatrix(self: Camera, width: u32, height: u32) Mat4 {
-    var proj = z.perspective(
-        self.fov_in_degrees,
-        @intToFloat(f32, width) / @intToFloat(f32, height),
-        self.z_near,
-        self.z_far,
-    );
-    proj.data[1][1] *= -1;
-    return proj;
+    const f = 1.0 / std.math.tan(z.toRadians(self.fov_in_degrees * 0.5));
+    const aspect_ratio = @intToFloat(f32, width) / @intToFloat(f32, height);
+    return  Mat4.fromSlice(&.{
+        f / aspect_ratio, 0,  0,           0,
+        0,                -f, 0,           0,
+        0,                0,  0,           1,
+        0,                0,  self.z_near, 0,
+    });
 }
 
 pub fn moveCamera(self: *Camera, window: Window, dt: f32) void {
     var x_dir: f32 = 0;
     var y_dir: f32 = 0;
 
-    if (window.isKey(.j, .press)) y_dir += dt;
-    if (window.isKey(.k, .press)) y_dir -= dt;
-    if (window.isKey(.h, .press)) x_dir += dt;
-    if (window.isKey(.l, .press)) x_dir -= dt;
+    if (window.isKey(.j, .press)) y_dir -= dt;
+    if (window.isKey(.k, .press)) y_dir += dt;
+    if (window.isKey(.h, .press)) x_dir -= dt;
+    if (window.isKey(.l, .press)) x_dir += dt;
 
     // limit pitch values between about +/- 85ish degrees
     self.yaw += x_dir * rotate_speed;
@@ -47,8 +46,8 @@ pub fn moveCamera(self: *Camera, window: Window, dt: f32) void {
     self.yaw = std.math.mod(f32, self.yaw, 360) catch unreachable;
 
     var move_dir = Vec3.zero();
-    if (window.isKey(.w, .press)) move_dir.z += dt;
-    if (window.isKey(.s, .press)) move_dir.z -= dt;
+    if (window.isKey(.w, .press)) move_dir.z -= dt;
+    if (window.isKey(.s, .press)) move_dir.z += dt;
     if (window.isKey(.a, .press)) move_dir.x += dt;
     if (window.isKey(.d, .press)) move_dir.x -= dt;
     if (window.isKey(.space, .press)) move_dir.y += dt;

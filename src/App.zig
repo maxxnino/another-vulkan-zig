@@ -91,10 +91,10 @@ const Light = struct {
     pub fn update(self: *Light, window: Window, dt: f32) void {
         var h: f32 = 0;
         var v: f32 = 0;
-        if (window.isKey(.right, .press)) h += 1;
-        if (window.isKey(.left, .press)) h -= 1;
-        if (window.isKey(.up, .press)) v += 1;
-        if (window.isKey(.down, .press)) v -= 1;
+        if (window.isKey(.right, .press)) h -= 1;
+        if (window.isKey(.left, .press)) h += 1;
+        if (window.isKey(.up, .press)) v -= 1;
+        if (window.isKey(.down, .press)) v += 1;
         self.x += h * dt * speed;
         self.z += v * dt * speed;
     }
@@ -360,11 +360,15 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     );
     // ============================================
     self.camera = Camera{
-        .pitch = 270,
-        .yaw = 30,
+        .pitch = 0,
+        .yaw = -30,
         .pos = Vec3.new(0, 2, 4),
     };
-    self.light = .{};
+    self.light = .{
+        .x = 0,
+        .y = 0,
+        .z = -10,
+    };
 
     self.ubo_buffers = try allocator.alloc(Buffer, self.framebuffers.len);
 
@@ -631,12 +635,12 @@ pub fn createSkyboxPipeline(
 ) !vk.Pipeline {
     return gc.createPipeline(.{
         .cull_mode = .{ .front_bit = true },
-        .face_winding = .counter_clockwise,
+        .face_winding = .clockwise,
         .msaa = true,
         .depth = .{
             .enable = true,
             .write = false,
-            .compare_op = .less_or_equal,
+            .compare_op = .greater_or_equal,
             .format = .d32_sfloat_s8_uint,
         },
         .shaders = shaders,

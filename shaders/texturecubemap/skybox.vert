@@ -15,7 +15,7 @@ void main()
     out_uvw = pos.xyz;
     pos = ubo.proj * ubo.view * pos;
 
-    // make sure that the depth after w divide will be 1.0 (so that the z-buffering will work)
-	gl_Position = pos.xyww;
+    // make sure z = 0 (so that the z-buffering will work)
+	gl_Position = vec4(pos.xy, 0, pos.w);
 
 }

@@ -129,7 +129,7 @@ pub fn beginFrame(self: Self, gc: GraphicsContext, framebuffer: vk.Framebuffer, 
             .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
         },
         .{
-            .depth_stencil = .{ .depth = 1, .stencil = 0 },
+            .depth_stencil = .{ .depth = 0, .stencil = 0 },
         },
         .{
             .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
@@ -197,9 +197,16 @@ pub fn createBasicPipeline(
 ) !vk.Pipeline {
     return gc.createPipeline(.{
         .cull_mode = .{ .back_bit = true },
-        .face_winding = .counter_clockwise,
+        .face_winding = .clockwise,
         .msaa = true,
         .ssaa = true,
+        .depth = .{
+            .enable = true,
+            .write = true,
+            .compare_op = .greater,
+            .format = .d32_sfloat_s8_uint,
+        },
+
         .shaders = shaders,
         .pipeline_layout = pipeline_layout,
         .render_pass = render_pass,
