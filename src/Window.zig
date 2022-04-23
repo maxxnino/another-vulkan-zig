@@ -45,7 +45,7 @@ pub fn init(app_name: [*:0]const u8, is_fullscreen: bool, width: u32, height: u3
 }
 
 pub fn setDataAndCallBack(self: *Self) void {
-    self.window.setUserPointer(Self, self);
+    self.window.setUserPointer(@ptrCast(*anyopaque, self));
     self.window.setKeyCallback(Self.keyboardCallBack);
     self.window.setCursorPosCallback(Self.cursorPosCallback);
     self.window.setMouseButtonCallback(Self.mouseButtonCallback);
@@ -99,13 +99,13 @@ fn keyboardCallBack(window: glfw.Window, key: glfw.Key, scancode: i32, action: g
     _ = mods;
     _ = scancode;
     if (action == .press) {
-        var self = window.getUserPointer(*Self).?;
+        var self = window.getUserPointer(Self).?;
         self.keyboard.insert(key);
     }
 }
 
 fn cursorPosCallback(window: glfw.Window, xpos: f64, ypos: f64) void {
-    var self = window.getUserPointer(*Self).?;
+    var self = window.getUserPointer(Self).?;
     self.cursor_pos.xpos = xpos;
     self.cursor_pos.ypos = ypos;
 }
@@ -113,12 +113,12 @@ fn cursorPosCallback(window: glfw.Window, xpos: f64, ypos: f64) void {
 fn mouseButtonCallback(window: glfw.Window, button: glfw.mouse_button.MouseButton, action: glfw.Action, mods: glfw.Mods) void {
     _ = mods;
     if (action == .press) {
-        return window.getUserPointer(*Self).?.mouse.insert(button);
+        return window.getUserPointer(Self).?.mouse.insert(button);
     }
 }
 
 fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
-    var self = window.getUserPointer(*Self).?;
+    var self = window.getUserPointer(Self).?;
     self.scroll_delta.xpos += xoffset;
     self.scroll_delta.ypos += yoffset;
 }

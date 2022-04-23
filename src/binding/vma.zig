@@ -4,7 +4,7 @@ pub const AllocatorCreateFlags = packed struct {
     /// \brief Allocator and all objects created from it will not be synchronized internally, so you must guarantee they are used from only one thread at a time or synchronized externally by you.
     ///
     /// Using this flag may increase performance because internal mutexes are not used.
-    externally_synchronized: bool align(4) = false,
+    externally_synchronized: bool = false,
 
     /// \brief Enables usage of vk.KHR_dedicated_allocation extension.
     ///
@@ -71,79 +71,79 @@ pub const RecordFlags = vk.Flags;
 
 /// # Simple patterns
 /// ## Render targets
-/// - When: Any resources that you frequently write and read on GPU, e.g. 
-/// images used as color attachments (aka "render targets"), depth-stencil attachments, 
+/// - When: Any resources that you frequently write and read on GPU, e.g.
+/// images used as color attachments (aka "render targets"), depth-stencil attachments,
 /// images/buffers used as storage image/buffer (aka "Unordered Access View (UAV)").
 /// - What to do: Create them in video memory that is fastest to access from GPU using VMA_MEMORY_USAGE_GPU_ONLY.
-/// Consider using VK_KHR_dedicated_allocation extension and/or manually creating them as dedicated allocations 
-/// using VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, especially if they are large or if you plan to destroy 
-/// and recreate them e.g. when display resolution changes. Prefer to create such resources first and all 
+/// Consider using VK_KHR_dedicated_allocation extension and/or manually creating them as dedicated allocations
+/// using VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, especially if they are large or if you plan to destroy
+/// and recreate them e.g. when display resolution changes. Prefer to create such resources first and all
 /// other GPU resources (like textures and vertex buffers) later.
-/// 
+///
 /// ## Immutable resources
-/// - When: Any resources that you fill on CPU only once (aka "immutable") or infrequently and 
+/// - When: Any resources that you fill on CPU only once (aka "immutable") or infrequently and
 /// then read frequently on GPU, e.g. textures, vertex and index buffers, constant buffers that don't change often.
 /// - What to do: Create them in video memory that is fastest to access from GPU using VMA_MEMORY_USAGE_GPU_ONLY.
-/// To initialize content of such resource, create a CPU-side (aka "staging") copy of it in system memory 
-/// - VMA_MEMORY_USAGE_CPU_ONLY, map it, fill it, and submit a transfer from it to the GPU resource. 
-/// You can keep the staging copy if you need it for another upload transfer in the future. 
+/// To initialize content of such resource, create a CPU-side (aka "staging") copy of it in system memory
+/// - VMA_MEMORY_USAGE_CPU_ONLY, map it, fill it, and submit a transfer from it to the GPU resource.
+/// You can keep the staging copy if you need it for another upload transfer in the future.
 /// If you don't, you can destroy it or reuse this buffer for uploading different resource after the transfer finishes.
-/// Prefer to create just buffers in system memory rather than images, even for uploading textures. 
+/// Prefer to create just buffers in system memory rather than images, even for uploading textures.
 /// Use vkCmdCopyBufferToImage(). Dont use images with VK_IMAGE_TILING_LINEAR.
-/// 
+///
 /// ## Dynamic resources
-/// - When: Any resources that change frequently (aka "dynamic"), 
+/// - When: Any resources that change frequently (aka "dynamic"),
 /// e.g. every frame or every draw call, written on CPU, read on GPU.
-/// - What to do: Create them using VMA_MEMORY_USAGE_CPU_TO_GPU. 
+/// - What to do: Create them using VMA_MEMORY_USAGE_CPU_TO_GPU.
 /// You can map it and write to it directly on CPU, as well as read from it on GPU.
-/// This is a more complex situation. Different solutions are possible, and the best one depends on specific GPU type, 
-/// but you can use this simple approach for the start. Prefer to write to such resource sequentially (e.g. using memcpy). 
-/// Don't perform random access or any reads from it on CPU, as it may be very slow. 
+/// This is a more complex situation. Different solutions are possible, and the best one depends on specific GPU type,
+/// but you can use this simple approach for the start. Prefer to write to such resource sequentially (e.g. using memcpy).
+/// Don't perform random access or any reads from it on CPU, as it may be very slow.
 /// Also note that textures written directly from the host through a mapped pointer need to be in LINEAR not OPTIMAL layout.
-/// 
+///
 /// ## Readback
 /// - When: Resources that contain data written by GPU that you want to read back on CPU, e.g. results of some computations.
-/// - What to do: Create them using VMA_MEMORY_USAGE_GPU_TO_CPU. 
+/// - What to do: Create them using VMA_MEMORY_USAGE_GPU_TO_CPU.
 /// You can write to them directly on GPU, as well as map and read them on CPU.
 /// # Advanced patterns
 /// ## Detecting integrated graphics
-/// - You can support integrated graphics (like Intel HD Graphics, AMD APU) better by detecting it in Vulkan. 
-/// To do it, call vkGetPhysicalDeviceProperties(), inspect VkPhysicalDeviceProperties::deviceType 
-/// and look for VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU. When you find it, you can assume that memory is unified 
+/// - You can support integrated graphics (like Intel HD Graphics, AMD APU) better by detecting it in Vulkan.
+/// To do it, call vkGetPhysicalDeviceProperties(), inspect VkPhysicalDeviceProperties::deviceType
+/// and look for VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU. When you find it, you can assume that memory is unified
 /// and all memory types are comparably fast to access from GPU, regardless of VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.
-/// - You can then sum up sizes of all available memory heaps and treat them as useful for your GPU resources, 
-/// instead of only DEVICE_LOCAL ones. You can also prefer to create your resources in memory types 
+/// - You can then sum up sizes of all available memory heaps and treat them as useful for your GPU resources,
+/// instead of only DEVICE_LOCAL ones. You can also prefer to create your resources in memory types
 /// that are HOST_VISIBLE to map them directly instead of submitting explicit transfer (see below).
-/// 
+///
 /// ## Direct access versus transfer
 /// - For resources that you frequently write on CPU and read on GPU, many solutions are possible:
-/// - Create one copy in video memory using VMA_MEMORY_USAGE_GPU_ONLY, second copy in system memory using 
+/// - Create one copy in video memory using VMA_MEMORY_USAGE_GPU_ONLY, second copy in system memory using
 /// VMA_MEMORY_USAGE_CPU_ONLY and submit explicit transfer each time.
 /// - Create just a single copy using VMA_MEMORY_USAGE_CPU_TO_GPU, map it and fill it on CPU, read it directly on GPU.
 /// - Create just a single copy using VMA_MEMORY_USAGE_CPU_ONLY, map it and fill it on CPU, read it directly on GPU.
-/// - Which solution is the most efficient depends on your resource and especially on the GPU. 
+/// - Which solution is the most efficient depends on your resource and especially on the GPU.
 /// It is best to measure it and then make the decision. Some general recommendations:
-/// - On integrated graphics use (2) or (3) to avoid unnecessary time 
+/// - On integrated graphics use (2) or (3) to avoid unnecessary time
 /// and memory overhead related to using a second copy and making transfer.
-/// - For small resources (e.g. constant buffers) use (2). Discrete AMD cards have special 256 MiB pool of video memory 
-/// that is directly mappable. Even if the resource ends up in system memory, 
+/// - For small resources (e.g. constant buffers) use (2). Discrete AMD cards have special 256 MiB pool of video memory
+/// that is directly mappable. Even if the resource ends up in system memory,
 /// its data may be cached on GPU after first fetch over PCIe bus.
-/// - For larger resources (e.g. textures), decide between (1) and (2). 
-/// You may want to differentiate NVIDIA and AMD, e.g. by looking for memory type that is 
+/// - For larger resources (e.g. textures), decide between (1) and (2).
+/// You may want to differentiate NVIDIA and AMD, e.g. by looking for memory type that is
 /// both DEVICE_LOCAL and HOST_VISIBLE. When you find it, use (2), otherwise use (1).
 /// - Similarly, for resources that you frequently write on GPU and read on CPU, multiple solutions are possible:
-/// 
-/// - Create one copy in video memory using VMA_MEMORY_USAGE_GPU_ONLY, second copy in system memory 
+///
+/// - Create one copy in video memory using VMA_MEMORY_USAGE_GPU_ONLY, second copy in system memory
 /// using VMA_MEMORY_USAGE_GPU_TO_CPU and submit explicit tranfer each time.
 /// - Create just single copy using VMA_MEMORY_USAGE_GPU_TO_CPU, write to it directly on GPU, map it and read it on CPU.
 /// - You should take some measurements to decide which option is faster in case of your specific resource.
-/// 
+///
 /// Note that textures accessed directly from the host through a mapped pointer need to be in LINEAR layout,
-/// which may slow down their usage on the device. Textures accessed only by the device 
+/// which may slow down their usage on the device. Textures accessed only by the device
 /// and transfer operations can use OPTIMAL layout.
-/// 
-/// If you don't want to specialize your code for specific types of GPUs, you can still make 
-/// an simple optimization for cases when your resource ends up in mappable memory to use it directly 
+///
+/// If you don't want to specialize your code for specific types of GPUs, you can still make
+/// an simple optimization for cases when your resource ends up in mappable memory to use it directly
 /// in this case instead of creating CPU-side staging copy. For details see Finding out if memory is mappable.0
 pub const MemoryUsage = enum(i32) {
     /// No intended memory usage specified.
@@ -177,7 +177,7 @@ pub const MemoryUsage = enum(i32) {
     /// Memory that is both mappable on host (guarantees to be `HOST_VISIBLE`) and preferably fast to access by GPU.
     /// CPU access is typically uncached. Writes may be write-combined.
     ///
-    /// Usage: Resources written frequently by host (dynamic), read by device. 
+    /// Usage: Resources written frequently by host (dynamic), read by device.
     /// E.g. textures, vertex buffers, uniform buffers updated every frame or every draw call.
     cpu_to_gpu = 3,
     /// Memory mappable on host (guarantees to be `HOST_VISIBLE`) and cached.
@@ -200,6 +200,10 @@ pub const MemoryUsage = enum(i32) {
     ///
     /// Allocations with this usage are always created as dedicated - it implies #VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT.
     gpu_lazily_allocated = 6,
+    auto = 7,
+
+    auto_prefer_device = 8,
+    auto_prefer_host = 9,
 };
 /// Flags to be passed as AllocationCreateInfo::flags.
 pub const AllocationCreateFlags = packed struct {
@@ -612,6 +616,8 @@ pub const VulkanFunctions = extern struct {
     bindBufferMemory2: vk.PfnBindBufferMemory2,
     bindImageMemory2: vk.PfnBindImageMemory2,
     getPhysicalDeviceMemoryProperties2: vk.PfnGetPhysicalDeviceMemoryProperties2,
+    getDeviceBufferMemoryRequirements: vk.PfnGetDeviceBufferMemoryRequirements,
+    getDeviceImageMemoryRequirements: vk.PfnGetDeviceImageMemoryRequirements,
 };
 pub const RecordSettings = extern struct {
     flags: RecordFlags,
@@ -640,17 +646,6 @@ pub const AllocatorCreateInfo = extern struct {
     /// Optional, can be null. */
     pDeviceMemoryCallbacks: ?*const DeviceMemoryCallbacks = null,
 
-    /// \brief Maximum number of additional frames that are in use at the same time as current frame.
-    /// This value is used only when you make allocations with
-    /// VMA_ALLOCATION_CREATE_CAN_BECOME_LOST_BIT flag. Such allocation cannot become
-    /// lost if allocation.lastUseFrameIndex >= allocator.currentFrameIndex - frameInUseCount.
-    /// For example, if you double-buffer your command buffers, so resources used for
-    /// rendering in previous frame may still be in use by the GPU at the moment you
-    /// allocate resources needed for the current frame, set this value to 1.
-    /// If you want to allow any allocations other than used in the current frame to
-    /// become lost, set this value to 0.
-    frameInUseCount: u32,
-
     /// \brief Either null or a pointer to an array of limits on maximum number of bytes that can be allocated out of particular Vulkan memory heap.
     /// If not NULL, it must be a pointer to an array of
     /// `VkPhysicalDeviceMemoryProperties::memoryHeapCount` elements, defining limit on
@@ -674,12 +669,6 @@ pub const AllocatorCreateInfo = extern struct {
     /// \brief Pointers to Vulkan functions. Can be null.
     /// For details see [Pointers to Vulkan functions](@ref config_Vulkan_functions).
     pVulkanFunctions: ?*const VulkanFunctions = null,
-
-    /// \brief Parameters for recording of VMA calls. Can be null.
-    /// If not null, it enables recording of calls to VMA functions to a file.
-    /// If support for recording is not enabled using `VMA_RECORDING_ENABLED` macro,
-    /// creation of the allocator object fails with `VK_ERROR_FEATURE_NOT_PRESENT`.
-    pRecordSettings: ?*const RecordSettings = null,
 
     /// \brief Handle to Vulkan instance object.
     /// Starting from version 3.0.0 this member is no longer optional, it must be set!

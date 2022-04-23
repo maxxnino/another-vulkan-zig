@@ -16,7 +16,7 @@ const srcToString = @import("util.zig").srcToString;
 
 const required_device_extensions = [_][*:0]const u8{
     vk.extension_info.khr_swapchain.name,
-    vk.extension_info.ext_descriptor_indexing.name,
+    // vk.extension_info.ext_descriptor_indexing.name,
     vk.extension_info.khr_synchronization_2.name,
     // vk.extension_info.khr_timeline_semaphore.name,
     vk.extension_info.khr_push_descriptor.name,
@@ -81,7 +81,7 @@ pub const GraphicsContext = struct {
             .application_version = vk.makeApiVersion(2, 0, 0, 0),
             .p_engine_name = app_name,
             .engine_version = vk.makeApiVersion(0, 0, 0, 0),
-            .api_version = vk.API_VERSION_1_1,
+            .api_version = vk.API_VERSION_1_3,
         };
         var instance_exts = blk: {
             if (enable_safety) {
@@ -180,10 +180,9 @@ pub const GraphicsContext = struct {
             .flags = .{},
             .physicalDevice = self.pdev,
             .device = self.dev,
-            .frameInUseCount = 0,
             .pVulkanFunctions = &vma_fns,
             .instance = self.instance,
-            .vulkanApiVersion = vk.API_VERSION_1_1,
+            .vulkanApiVersion = vk.API_VERSION_1_3,
         });
 
         self.pool = try self.create(vk.CommandPoolCreateInfo{

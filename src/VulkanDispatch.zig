@@ -161,13 +161,15 @@ pub fn getVmaVulkanFunction(vki: InstanceDispatch, vkd: DeviceDispatch) vma.Vulk
         .bindBufferMemory2 = undefined, //vkd.dispatch.vkBindBufferMemory2,
         .bindImageMemory2 = undefined, //vkd.dispatch.vkBindImageMemory2,
         .getPhysicalDeviceMemoryProperties2 = undefined, //vkd.dispatch.vkGetPhysicalDeviceMemoryProperties2,
+        .getDeviceBufferMemoryRequirements = undefined,
+        .getDeviceImageMemoryRequirements = undefined,
     };
 }
 
 // Destroy Function
 pub fn destroy(vkd: DeviceDispatch, dev: vk.Device, resource: anytype) void {
     const ResourceType = @TypeOf(resource);
-    const name = @typeName(ResourceType);
+    const name = @typeName(ResourceType)[8..];
     if (ResourceType == vk.Image or ResourceType == vk.Buffer or ResourceType == MyBuffer) {
         @compileError("Can not destroy single vk." ++ name ++ " call " ++ name ++ ".deinit(GraphicsContext) instead");
     }
@@ -177,7 +179,7 @@ pub fn destroy(vkd: DeviceDispatch, dev: vk.Device, resource: anytype) void {
 
 pub fn create(vkd: DeviceDispatch, dev: vk.Device, create_info: anytype, object_name: ?[*:0]const u8) !CreateInfoToType(@TypeOf(create_info)) {
     const CreateInfo = @TypeOf(create_info);
-    const name = @typeName(CreateInfo);
+    const name = @typeName(CreateInfo)[8..];
     if (CreateInfo == vk.ImageCreateInfo or CreateInfo == vk.BufferCreateInfo or CreateInfo == MyBuffer.CreateInfo) {
         @compileError("Don't support " ++ @typeName(CreateInfo));
     }
@@ -279,7 +281,7 @@ const CreateLookupTable = struct {
 };
 
 pub fn CreateInfoToType(comptime T: type) type {
-    const des_type_name = @typeName(T);
+    const des_type_name = @typeName(T)[8..];
     const resource_name = blk: {
         if (std.mem.indexOf(u8, des_type_name, "CreateInfo")) |index| {
             if (std.mem.indexOf(u8, des_type_name, "Pipeline") != null and
