@@ -16,9 +16,6 @@ const srcToString = @import("util.zig").srcToString;
 
 const required_device_extensions = [_][*:0]const u8{
     vk.extension_info.khr_swapchain.name,
-    // vk.extension_info.ext_descriptor_indexing.name,
-    vk.extension_info.khr_synchronization_2.name,
-    // vk.extension_info.khr_timeline_semaphore.name,
     vk.extension_info.khr_push_descriptor.name,
 };
 
@@ -32,11 +29,6 @@ const required_device_feature = vk.PhysicalDeviceFeatures{
     .texture_compression_bc = vk.TRUE,
     .shader_int_16 = vk.TRUE,
 };
-
-const required_instance_layers = [_][*:0]const u8{
-    "VK_LAYER_KHRONOS_synchronization2",
-    // "VK_LAYER_KHRONOS_timeline_semaphore",
-} ++ if (enable_safety) [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"} else [_][*:0]const u8{};
 
 const required_validation_features = [_]vk.ValidationFeatureEnableEXT{
     .gpu_assisted_ext,
@@ -124,8 +116,8 @@ pub const GraphicsContext = struct {
             .flags = .{},
             .p_next = validation_features,
             .p_application_info = &app_info,
-            .enabled_layer_count = required_instance_layers.len,
-            .pp_enabled_layer_names = &required_instance_layers,
+            .enabled_layer_count = if(enable_safety) 1 else 0,
+            .pp_enabled_layer_names = if(enable_safety) &[_][*:0]const u8{"VK_LAYER_KHRONOS_validation"} else undefined,
             .enabled_extension_count = @intCast(u32, instance_exts.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &instance_exts[0]),
         }, null);
@@ -566,47 +558,29 @@ fn initializeCandidate(vki: InstanceDispatch, candidate: DeviceCandidate) !vk.De
     else
         2;
 
-    // var timeline_semaphore = vk.PhysicalDeviceTimelineSemaphoreFeatures{
-    //     .timeline_semaphore = vk.TRUE,
-    // };
-    var storage_16 = vk.PhysicalDevice16BitStorageFeatures{
-        // .p_next = @ptrCast(*anyopaque, &timeline_semaphore),
-        .storage_buffer_16_bit_access = vk.TRUE,
-        .uniform_and_storage_buffer_16_bit_access = vk.TRUE,
-    };
-    // enable khr_synchronization_2 feature
-    var khr_synchronization_2 = vk.PhysicalDeviceSynchronization2Features{
+    var vulkan13_features = vk.PhysicalDeviceVulkan13Features{
         .synchronization_2 = vk.TRUE,
-        .p_next = @ptrCast(*anyopaque, &storage_16),
+        .dynamic_rendering = vk.TRUE,
     };
-    //enable timeline_semaphore
-    const descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures{
-        .p_next = @ptrCast(*anyopaque, &khr_synchronization_2),
-        // .shader_input_attachment_array_dynamic_indexing= Bool32 = FALSE,
-        // .shader_uniform_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,
-        // .shader_storage_texel_buffer_array_dynamic_indexing= Bool32 = FALSE,
-        // .shader_uniform_buffer_array_non_uniform_indexing= Bool32 = FALSE,
+    var vulkan12_features = vk.PhysicalDeviceVulkan12Features{
+        .p_next = @ptrCast(*anyopaque, &vulkan13_features),
+        .timeline_semaphore = vk.TRUE,
+        .descriptor_indexing = vk.TRUE,
         .shader_sampled_image_array_non_uniform_indexing = vk.TRUE,
-        // .shader_storage_buffer_array_non_uniform_indexing= Bool32 = FALSE,
-        // .shader_storage_image_array_non_uniform_indexing= Bool32 = FALSE,
-        // .shader_input_attachment_array_non_uniform_indexing= Bool32 = FALSE,
-        // .shader_uniform_texel_buffer_array_non_uniform_indexing= Bool32 = FALSE,
-        // .shader_storage_texel_buffer_array_non_uniform_indexing= Bool32 = FALSE,
-        // .descriptor_binding_uniform_buffer_update_after_bind= Bool32 = FALSE,
-        // .descriptor_binding_sampled_image_update_after_bind= Bool32 = FALSE,
-        // .descriptor_binding_storage_image_update_after_bind= Bool32 = FALSE,
-        // .descriptor_binding_storage_buffer_update_after_bind= Bool32 = FALSE,
-        // .descriptor_binding_uniform_texel_buffer_update_after_bind= Bool32 = FALSE,
-        // .descriptor_binding_storage_texel_buffer_update_after_bind= Bool32 = FALSE,
         .descriptor_binding_update_unused_while_pending = vk.TRUE,
         .descriptor_binding_partially_bound = vk.TRUE,
         .descriptor_binding_variable_descriptor_count = vk.TRUE,
         .runtime_descriptor_array = vk.TRUE,
     };
+    var vulkan11_features = vk.PhysicalDeviceVulkan11Features{
+        .p_next = @ptrCast(*anyopaque, &vulkan12_features),
+        .storage_buffer_16_bit_access = vk.TRUE,
+        .uniform_and_storage_buffer_16_bit_access = vk.TRUE,
+    };
 
     return try vki.createDevice(candidate.pdev, &.{
         .flags = .{},
-        .p_next = @ptrCast(*const anyopaque, &descriptor_indexing),
+        .p_next = @ptrCast(*const anyopaque, &vulkan11_features),
         .queue_create_info_count = queue_count,
         .p_queue_create_infos = &qci,
         .enabled_layer_count = 0,
